@@ -255,8 +255,9 @@ service cloud.firestore {
     }
 
     match /incidents/{incidentId} {
-      allow read, write: if isAdmin();
+      allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidIncident(request.resource.data);
+      allow update, delete: if isAdmin();
     }
 
     // Default deny

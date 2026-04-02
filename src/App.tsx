@@ -17,6 +17,7 @@ import {
   setDoc,
   limit,
   getDocs,
+  getDocsFromServer,
   getDoc,
   deleteDoc,
   Timestamp,
@@ -65,8 +66,23 @@ import { cn } from './lib/utils';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 
+import { 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  Legend, 
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell
+} from 'recharts';
+
 // --- Error Handling ---
 enum OperationType {
+  GET = 'get',
   UPDATE = 'update',
   DELETE = 'delete',
   LIST = 'list',
@@ -216,6 +232,8 @@ const Card = ({
       } else {
         setHasUnread(true);
       }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, `userReadStatus/${statusId}`);
     });
 
     return () => unsubscribe();
@@ -437,6 +455,8 @@ const CardDetailModal = ({
         cardId: card.id,
         lastReadAt: serverTimestamp()
       }, { merge: true });
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, `cards/${card.id}/messages`);
     });
     return () => unsubscribe();
   }, [card.id, user.uid]);
@@ -757,6 +777,8 @@ const AttendanceManagementModal = ({ onClose, users }: AttendanceManagementModal
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setAttendances(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Attendance)));
       setLoading(false);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'attendance');
     });
     return () => unsubscribe();
   }, []);
@@ -1120,78 +1142,190 @@ const KPIModal = ({ onClose, users }: KPIModalProps) => {
   const [attendances, setAttendances] = useState<Attendance[]>([]);
   const [dailyTasks, setDailyTasks] = useState<DailyTask[]>([]);
   const [orders, setOrders] = useState<CardType[]>([]);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showAuditForm, setShowAuditForm] = useState(false);
+  
+  // Audit state
+  const [auditUserId, setAuditUserId] = useState('');
+  const [startDate, setStartDate] = useState(format(new Date(), 'yyyy-MM-01'));
+  const [endDate, setEndDate] = useState(format(new Date(), 'yyyy-MM-dd'));
 
   useEffect(() => {
     const fetchAllData = async () => {
-      const [attSnap, taskSnap, orderSnap] = await Promise.all([
+      const [attSnap, taskSnap, orderSnap, incSnap] = await Promise.all([
         getDocs(collection(db, 'attendance')),
         getDocs(collection(db, 'dailyTasks')),
-        getDocs(collection(db, 'cards'))
+        getDocs(collection(db, 'cards')),
+        getDocs(collection(db, 'incidents'))
       ]);
 
       setAttendances(attSnap.docs.map(d => ({ id: d.id, ...d.data() } as Attendance)));
       setDailyTasks(taskSnap.docs.map(d => ({ id: d.id, ...d.data() } as DailyTask)));
       setOrders(orderSnap.docs.map(d => ({ id: d.id, ...d.data() } as CardType)));
+      setIncidents(incSnap.docs.map(d => ({ id: d.id, ...d.data() } as Incident)));
       setLoading(false);
     };
 
     fetchAllData();
   }, []);
 
-  const generatePDF = () => {
+  // --- Chart Data Calculations ---
+  
+  // 1. Productivity by Technician (Repaired Orders)
+  const productivityData = users
+    .filter(u => u.role === 'tecnico' || u.role === 'admin')
+    .map(u => ({
+      name: u.displayName || 'Técnico',
+      reparadas: orders.filter(o => o.assignedTechnicianId === u.uid && o.currentStep === 'finalizada' && o.isRepaired).length,
+      noReparadas: orders.filter(o => o.assignedTechnicianId === u.uid && o.currentStep === 'finalizada' && !o.isRepaired).length
+    }))
+    .sort((a, b) => b.reparadas - a.reparadas);
+
+  // 2. Incident Distribution
+  const incidentDistribution = [
+    { name: 'Garantías', value: incidents.filter(i => i.type === 'garantia').length, color: '#ef4444' },
+    { name: 'Taller', value: incidents.filter(i => i.type === 'taller').length, color: '#3b82f6' },
+    { name: 'Recepción', value: incidents.filter(i => i.type === 'recepcion').length, color: '#f59e0b' }
+  ].filter(i => i.value > 0);
+
+  // 3. Daily Task History (Last 15 days)
+  const last15Days = Array.from({ length: 15 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    return format(d, 'yyyy-MM-dd');
+  }).reverse();
+
+  const taskHistoryData = last15Days.map(date => ({
+    date: format(new Date(date), 'dd/MM'),
+    count: dailyTasks.filter(t => t.date === date).length
+  }));
+
+  const generateAuditPDF = () => {
+    const selectedUser = users.find(u => u.uid === auditUserId);
+    if (!selectedUser) return;
+
     const doc = new jsPDF();
     const now = format(new Date(), 'dd/MM/yyyy HH:mm');
+    const start = new Date(startDate);
+    const end = new Date(endDate);
 
-    doc.setFontSize(20);
-    doc.text('Informe de Actividad - PuntoDamia', 14, 22);
+    // Filter data for the audit
+    const userOrders = orders.filter(o => 
+      o.assignedTechnicianId === auditUserId && 
+      o.createdAt?.toDate() >= start && 
+      o.createdAt?.toDate() <= end
+    );
+    
+    const userIncidents = incidents.filter(i => 
+      i.technicianId === auditUserId && 
+      i.createdAt?.toDate() >= start && 
+      i.createdAt?.toDate() <= end
+    );
+
+    const userAttendance = attendances.filter(a => 
+      a.userId === auditUserId && 
+      new Date(a.date) >= start && 
+      new Date(a.date) <= end
+    );
+
+    const userTasks = dailyTasks.filter(t => 
+      t.userId === auditUserId && 
+      new Date(t.date) >= start && 
+      new Date(t.date) <= end
+    );
+
+    // Calculate days without task
+    // (This is a bit complex, we'd need to know which days they actually worked)
+    // For now, let's list days where they had an order activity but no task
+    const activeDays = new Set(userOrders.map(o => format(o.createdAt.toDate(), 'yyyy-MM-dd')));
+    const taskDays = new Set(userTasks.map(t => t.date));
+    const missingTaskDays = Array.from(activeDays).filter(d => !taskDays.has(d)).sort();
+
+    doc.setFontSize(22);
+    doc.setTextColor(0, 174, 239);
+    doc.text('AUDITORÍA DE DESEMPEÑO', 14, 22);
+    
     doc.setFontSize(10);
-    doc.text(`Generado el: ${now}`, 14, 30);
+    doc.setTextColor(100);
+    doc.text(`PuntoDamia - Sistema de Gestión Técnica`, 14, 30);
+    doc.text(`Generado: ${now}`, 14, 35);
+    doc.text(`Periodo: ${format(start, 'dd/MM/yyyy')} al ${format(end, 'dd/MM/yyyy')}`, 14, 40);
 
-    // Attendance Table
+    doc.setDrawColor(0, 174, 239);
+    doc.line(14, 45, 196, 45);
+
+    // User Info
     doc.setFontSize(14);
-    doc.text('Registro de Asistencias', 14, 45);
+    doc.setTextColor(0);
+    doc.text(`Empleado: ${selectedUser.displayName}`, 14, 55);
+    doc.setFontSize(10);
+    doc.text(`Rol: ${selectedUser.role.toUpperCase()}`, 14, 62);
+    doc.text(`Email: ${selectedUser.email}`, 14, 67);
+
+    // Summary Stats
+    const repaired = userOrders.filter(o => o.currentStep === 'finalizada' && o.isRepaired).length;
+    const notRepaired = userOrders.filter(o => o.currentStep === 'finalizada' && !o.isRepaired).length;
+    const warranties = userOrders.filter(o => o.tags?.includes('GARANTIA')).length;
+
+    doc.setFontSize(12);
+    doc.text('RESUMEN DE MÉTRICAS', 14, 80);
     (doc as any).autoTable({
-      startY: 50,
-      head: [['Usuario', 'Fecha', 'Motivo', 'Justificado', 'Nota']],
-      body: attendances.map(a => [
-        a.userName,
+      startY: 85,
+      head: [['Métrica', 'Cantidad']],
+      body: [
+        ['Órdenes Reparadas', repaired],
+        ['Órdenes No Reparadas', notRepaired],
+        ['Órdenes de Garantía Recibidas', warranties],
+        ['Incidencias Registradas', userIncidents.length],
+        ['Días sin Registro de Tarea Diaria', missingTaskDays.length]
+      ],
+      theme: 'striped',
+      headStyles: { fillColor: [0, 174, 239] }
+    });
+
+    // Incidents Detail
+    const finalY1 = (doc as any).lastAutoTable.finalY + 15;
+    doc.text('DETALLE DE INCIDENCIAS', 14, finalY1);
+    (doc as any).autoTable({
+      startY: finalY1 + 5,
+      head: [['Fecha', 'Tipo', 'Orden', 'Descripción', 'Estado']],
+      body: userIncidents.map(i => [
+        formatTimestamp(i.createdAt, 'dd/MM/yy'),
+        i.type.toUpperCase(),
+        `#${i.orderNumber}`,
+        i.description,
+        i.status.toUpperCase()
+      ]),
+      theme: 'grid',
+      headStyles: { fillColor: [239, 68, 68] }
+    });
+
+    // Attendance Detail
+    const finalY2 = (doc as any).lastAutoTable.finalY + 15;
+    if (finalY2 > 250) doc.addPage();
+    doc.text('REGISTRO DE ASISTENCIAS / NOVEDADES', 14, finalY2 > 250 ? 20 : finalY2);
+    (doc as any).autoTable({
+      startY: finalY2 > 250 ? 25 : finalY2 + 5,
+      head: [['Fecha', 'Motivo', 'Justificado', 'Nota']],
+      body: userAttendance.map(a => [
         a.date,
         a.reason,
         a.justified ? 'SÍ' : 'NO',
         a.note || '-'
       ]),
+      theme: 'striped',
+      headStyles: { fillColor: [100, 116, 139] }
     });
 
-    // Daily Tasks Table
-    const finalY1 = (doc as any).lastAutoTable.finalY || 50;
-    doc.text('Tareas Diarias de Limpieza', 14, finalY1 + 15);
-    (doc as any).autoTable({
-      startY: finalY1 + 20,
-      head: [['Usuario', 'Fecha', 'Tarea']],
-      body: dailyTasks.map(t => [
-        t.userName,
-        t.date,
-        t.taskType
-      ]),
-    });
+    // Missing Tasks
+    const finalY3 = (doc as any).lastAutoTable.finalY + 15;
+    if (finalY3 > 250) doc.addPage();
+    doc.text('DÍAS SIN TAREA DIARIA REGISTRADA', 14, finalY3 > 250 ? 20 : finalY3);
+    doc.setFontSize(9);
+    doc.text(missingTaskDays.length > 0 ? missingTaskDays.join(', ') : 'Ninguno. ¡Excelente cumplimiento!', 14, finalY3 > 250 ? 30 : finalY3 + 10, { maxWidth: 180 });
 
-    // Orders Table
-    const finalY2 = (doc as any).lastAutoTable.finalY || finalY1 + 20;
-    doc.text('Resumen de Órdenes', 14, finalY2 + 15);
-    (doc as any).autoTable({
-      startY: finalY2 + 20,
-      head: [['Nro', 'Técnico', 'Estado', 'Creada', 'Finalizada']],
-      body: orders.map(o => [
-        o.title,
-        o.assignedTechnicianName || '-',
-        o.currentStep,
-        formatTimestamp(o.createdAt, 'dd/MM/yy'),
-        o.finalizedAt ? formatTimestamp(o.finalizedAt, 'dd/MM/yy') : '-'
-      ]),
-    });
-
-    doc.save(`Informe_PuntoDamia_${format(new Date(), 'yyyyMMdd')}.pdf`);
+    doc.save(`Auditoria_${selectedUser.displayName.replace(/\s+/g, '_')}_${format(new Date(), 'yyyyMMdd')}.pdf`);
   };
 
   return (
@@ -1215,17 +1349,20 @@ const KPIModal = ({ onClose, users }: KPIModalProps) => {
               <BarChart3 className="w-6 h-6 text-[#00aeef]" />
             </div>
             <div>
-              <h3 className="font-black text-xl text-slate-950 tracking-tight">KPIs e Informes de Gestión</h3>
-              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Métricas de rendimiento y actividad global</p>
+              <h3 className="font-black text-xl text-slate-950 tracking-tight">Panel de Control y KPIs</h3>
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Métricas de rendimiento y auditoría global</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
             <button 
-              onClick={generatePDF}
-              className="px-6 py-2.5 bg-[#00aeef] text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-[#0088cc] transition-all flex items-center gap-2 shadow-lg shadow-[#00aeef]/20"
+              onClick={() => setShowAuditForm(!showAuditForm)}
+              className={cn(
+                "px-6 py-2.5 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all flex items-center gap-2 shadow-lg",
+                showAuditForm ? "bg-slate-900 text-white" : "bg-white border border-slate-300 text-slate-700"
+              )}
             >
-              <Download className="w-4 h-4" />
-              Descargar PDF
+              <Users className="w-4 h-4" />
+              {showAuditForm ? 'Ver Dashboard' : 'Auditoría de Empleado'}
             </button>
             <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full text-slate-600 hover:text-slate-800 transition-colors">
               <X className="w-6 h-6" />
@@ -1233,128 +1370,193 @@ const KPIModal = ({ onClose, users }: KPIModalProps) => {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-8 scrollbar-none">
+        <div className="flex-1 overflow-y-auto p-8 scrollbar-none bg-slate-50/30">
           {loading ? (
             <div className="flex items-center justify-center h-full">
               <RefreshCw className="w-8 h-8 text-[#00aeef] animate-spin" />
             </div>
+          ) : showAuditForm ? (
+            <div className="max-w-2xl mx-auto space-y-8 py-10">
+              <div className="text-center space-y-2">
+                <h4 className="text-2xl font-black text-slate-950 tracking-tight">Generar Informe de Auditoría</h4>
+                <p className="text-sm text-slate-500">Selecciona el técnico y el rango de fechas para el reporte PDF.</p>
+              </div>
+
+              <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Técnico a Auditar</label>
+                  <select 
+                    value={auditUserId}
+                    onChange={e => setAuditUserId(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-[#00aeef]/50"
+                  >
+                    <option value="">Seleccionar Empleado...</option>
+                    {users.map(u => (
+                      <option key={u.uid} value={u.uid}>{u.displayName} ({u.role})</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Desde</label>
+                    <input 
+                      type="date"
+                      value={startDate}
+                      onChange={e => setStartDate(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-[#00aeef]/50"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Hasta</label>
+                    <input 
+                      type="date"
+                      value={endDate}
+                      onChange={e => setEndDate(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-[#00aeef]/50"
+                    />
+                  </div>
+                </div>
+
+                <button 
+                  onClick={generateAuditPDF}
+                  disabled={!auditUserId}
+                  className="w-full py-4 bg-[#00aeef] text-white font-black uppercase tracking-widest rounded-2xl hover:bg-[#0088cc] transition-all shadow-lg shadow-[#00aeef]/20 disabled:opacity-30 flex items-center justify-center gap-3"
+                >
+                  <Download className="w-5 h-5" />
+                  Generar y Descargar Auditoría
+                </button>
+              </div>
+            </div>
           ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              {/* Stats Overview */}
-              <div className="lg:col-span-3 grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="bg-slate-50 p-6 rounded-3xl border border-slate-200">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Órdenes</p>
-                  <p className="text-3xl font-black text-slate-950">{orders.length}</p>
+            <div className="space-y-10">
+              {/* Top Stats */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Productividad Total</p>
+                  <p className="text-3xl font-black text-slate-950">{orders.filter(o => o.currentStep === 'finalizada' && o.isRepaired).length}</p>
+                  <p className="text-[9px] text-green-600 font-bold mt-1">Órdenes Reparadas</p>
                 </div>
-                <div className="bg-slate-50 p-6 rounded-3xl border border-slate-200">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Finalizadas</p>
-                  <p className="text-3xl font-black text-green-600">{orders.filter(o => o.currentStep === 'finalizada').length}</p>
+                <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Tasa de Éxito</p>
+                  <p className="text-3xl font-black text-[#00aeef]">
+                    {orders.filter(o => o.currentStep === 'finalizada').length > 0 
+                      ? Math.round((orders.filter(o => o.currentStep === 'finalizada' && o.isRepaired).length / orders.filter(o => o.currentStep === 'finalizada').length) * 100)
+                      : 0}%
+                  </p>
+                  <p className="text-[9px] text-slate-500 font-bold mt-1">Efectividad Técnica</p>
                 </div>
-                <div className="bg-slate-50 p-6 rounded-3xl border border-slate-200">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Asistencias</p>
-                  <p className="text-3xl font-black text-[#00aeef]">{attendances.length}</p>
+                <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Incidencias</p>
+                  <p className="text-3xl font-black text-red-500">{incidents.length}</p>
+                  <p className="text-[9px] text-slate-500 font-bold mt-1">Alertas Registradas</p>
                 </div>
-                <div className="bg-slate-50 p-6 rounded-3xl border border-slate-200">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Tareas Limpieza</p>
+                <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Cumplimiento Tareas</p>
                   <p className="text-3xl font-black text-amber-600">{dailyTasks.length}</p>
+                  <p className="text-[9px] text-slate-500 font-bold mt-1">Registros de Limpieza</p>
                 </div>
               </div>
 
-              {/* Detailed Lists */}
-              <div className="lg:col-span-2 space-y-8">
-                <section className="space-y-4">
-                  <h4 className="text-xs font-black text-slate-950 uppercase tracking-widest flex items-center gap-2">
-                    <CalendarCheck className="w-4 h-4 text-[#00aeef]" />
-                    Últimas Asistencias
-                  </h4>
-                  <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-50 border-b border-slate-200">
-                        <tr>
-                          <th className="px-4 py-3 font-black text-slate-500 uppercase tracking-widest">Usuario</th>
-                          <th className="px-4 py-3 font-black text-slate-500 uppercase tracking-widest">Fecha</th>
-                          <th className="px-4 py-3 font-black text-slate-500 uppercase tracking-widest">Motivo</th>
-                          <th className="px-4 py-3 font-black text-slate-500 uppercase tracking-widest">Estado</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {attendances.slice(0, 10).map(att => (
-                          <tr key={att.id}>
-                            <td className="px-4 py-3 font-bold text-slate-900">{att.userName}</td>
-                            <td className="px-4 py-3 text-slate-500 font-mono">{att.date}</td>
-                            <td className="px-4 py-3 text-slate-600">{att.reason}</td>
-                            <td className="px-4 py-3">
-                              <span className={cn(
-                                "px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest",
-                                att.justified ? "bg-green-50 text-green-600" : "bg-red-50 text-red-600"
-                              )}>
-                                {att.justified ? 'Justificado' : 'No Justificado'}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+              {/* Charts Grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Productivity Chart */}
+                <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest">Productividad por Técnico</h4>
+                    <BarChart3 className="w-4 h-4 text-slate-400" />
                   </div>
-                </section>
+                  <div className="h-[300px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={productivityData} layout="vertical" margin={{ left: 40 }}>
+                        <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
+                        <XAxis type="number" hide />
+                        <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: '#64748b' }} />
+                        <Tooltip 
+                          cursor={{ fill: '#f8fafc' }}
+                          contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                        />
+                        <Bar dataKey="reparadas" fill="#00aeef" radius={[0, 4, 4, 0]} barSize={20} name="Reparadas" />
+                        <Bar dataKey="noReparadas" fill="#cbd5e1" radius={[0, 4, 4, 0]} barSize={20} name="No Reparadas" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
 
-                <section className="space-y-4">
+                {/* Incident Distribution Chart */}
+                <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest">Distribución de Incidencias</h4>
+                    <AlertTriangle className="w-4 h-4 text-slate-400" />
+                  </div>
+                  <div className="h-[300px] w-full flex items-center">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={incidentDistribution}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={60}
+                          outerRadius={100}
+                          paddingAngle={5}
+                          dataKey="value"
+                        >
+                          {incidentDistribution.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                        <Legend verticalAlign="bottom" height={36}/>
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {/* Daily Task History Chart */}
+                <div className="lg:col-span-2 bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest">Historial de Tareas Diarias (Últimos 15 días)</h4>
+                    <ClipboardList className="w-4 h-4 text-slate-400" />
+                  </div>
+                  <div className="h-[250px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={taskHistoryData}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                        <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: '#64748b' }} />
+                        <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: '#64748b' }} />
+                        <Tooltip 
+                          cursor={{ fill: '#f8fafc' }}
+                          contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                        />
+                        <Bar dataKey="count" fill="#f59e0b" radius={[4, 4, 0, 0]} barSize={30} name="Tareas Registradas" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {/* Performance Ranking */}
+                <div className="lg:col-span-2 space-y-4">
                   <h4 className="text-xs font-black text-slate-950 uppercase tracking-widest flex items-center gap-2">
-                    <ClipboardList className="w-4 h-4 text-[#00aeef]" />
-                    Tareas Diarias Realizadas
+                    <Activity className="w-4 h-4 text-[#00aeef]" />
+                    Ranking de Desempeño Técnico
                   </h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {dailyTasks.slice(0, 10).map(task => (
-                      <div key={task.id} className="bg-slate-50 border border-slate-200 p-3 rounded-xl flex items-center justify-between">
-                        <div>
-                          <p className="text-[11px] font-black text-slate-900 uppercase tracking-tight">{task.taskType}</p>
-                          <p className="text-[9px] text-slate-500 font-bold">{task.userName} • {task.date}</p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {productivityData.slice(0, 3).map((u, i) => (
+                      <div key={u.name} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm relative overflow-hidden group">
+                        <div className="absolute -right-4 -top-4 w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform">
+                          <span className="text-4xl font-black text-slate-200">#{i + 1}</span>
                         </div>
-                        <Check className="w-3 h-3 text-green-500" />
+                        <p className="text-sm font-black text-slate-900 mb-1">{u.name}</p>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{u.reparadas} Reparaciones Exitosas</p>
+                        <div className="mt-4 h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-[#00aeef] rounded-full" 
+                            style={{ width: `${(u.reparadas / (u.reparadas + u.noReparadas || 1)) * 100}%` }}
+                          />
+                        </div>
                       </div>
                     ))}
                   </div>
-                </section>
-              </div>
-
-              {/* User Performance Ranking */}
-              <div className="space-y-4">
-                <h4 className="text-xs font-black text-slate-950 uppercase tracking-widest flex items-center gap-2">
-                  <Activity className="w-4 h-4 text-[#00aeef]" />
-                  Actividad por Usuario
-                </h4>
-                <div className="space-y-3">
-                  {users.map(u => {
-                    const userOrders = orders.filter(o => o.assignedTechnicianId === u.uid).length;
-                    const userTasks = dailyTasks.filter(t => t.userId === u.uid).length;
-                    const userAtt = attendances.filter(a => a.userId === u.uid).length;
-                    
-                    return (
-                      <div key={u.uid} className="bg-white border border-slate-200 p-4 rounded-2xl">
-                        <div className="flex items-center gap-3 mb-3">
-                          <img src={u.photoURL || ''} className="w-8 h-8 rounded-full border border-slate-200" alt="" />
-                          <div>
-                            <p className="text-xs font-black text-slate-900 leading-none">{u.displayName}</p>
-                            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-1">{u.role}</p>
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-3 gap-2">
-                          <div className="text-center p-2 bg-slate-50 rounded-xl">
-                            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Órdenes</p>
-                            <p className="text-sm font-black text-slate-900">{userOrders}</p>
-                          </div>
-                          <div className="text-center p-2 bg-slate-50 rounded-xl">
-                            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Tareas</p>
-                            <p className="text-sm font-black text-slate-900">{userTasks}</p>
-                          </div>
-                          <div className="text-center p-2 bg-slate-50 rounded-xl">
-                            <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Asist.</p>
-                            <p className="text-sm font-black text-slate-900">{userAtt}</p>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
                 </div>
               </div>
             </div>
@@ -1391,6 +1593,8 @@ const IncidentsManagementModal = ({ onClose, users, user }: IncidentsManagementM
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setIncidents(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Incident)));
       setLoading(false);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'incidents');
     });
     return () => unsubscribe();
   }, []);
@@ -1803,6 +2007,12 @@ const UserManagementModal = ({ onClose, users }: UserManagementModalProps) => {
         // Delete the card itself
         await deleteDoc(doc(db, 'cards', cardDoc.id));
       }
+
+      // 3. Delete all incidents
+      const incidentsSnap = await getDocs(collection(db, 'incidents'));
+      for (const d of incidentsSnap.docs) {
+        await deleteDoc(doc(db, 'incidents', d.id));
+      }
       
       console.log("System Reset Successful");
     } catch (error) {
@@ -1823,7 +2033,7 @@ const UserManagementModal = ({ onClose, users }: UserManagementModalProps) => {
           initial={{ scale: 0.9, opacity: 0, y: 20 }}
           animate={{ scale: 1, opacity: 1, y: 0 }}
           exit={{ scale: 0.9, opacity: 0, y: 20 }}
-          className="bg-white w-full max-w-2xl h-[700px] rounded-3xl border border-slate-300 shadow-2xl flex flex-col overflow-hidden"
+          className="bg-white w-full max-w-2xl h-[85vh] rounded-3xl border border-slate-300 shadow-2xl flex flex-col overflow-hidden"
           onClick={e => e.stopPropagation()}
         >
           <div className="p-6 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
@@ -1939,6 +2149,19 @@ export default function App() {
   const [dailyTaskDone, setDailyTaskDone] = useState(false);
   const [showDailyTaskMessage, setShowDailyTaskMessage] = useState(false);
   const [dailyTaskType, setDailyTaskType] = useState<string | null>(null);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+
+  useEffect(() => {
+    if (!user) return;
+    
+    const q = query(collection(db, 'incidents'), orderBy('createdAt', 'desc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setIncidents(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Incident)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'incidents');
+    });
+    return () => unsubscribe();
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
@@ -1956,6 +2179,8 @@ export default function App() {
         setDailyTaskDone(false);
         setDailyTaskType(null);
       }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'dailyTasks');
     });
     return () => unsubscribe();
   }, [user]);
@@ -2058,10 +2283,11 @@ export default function App() {
     // Test connection
     const testConnection = async () => {
       try {
-        await getDocs(query(collection(db, 'boards'), limit(1)));
+        // Use getDocsFromServer to bypass cache and test real connection
+        await getDocsFromServer(query(collection(db, 'boards'), limit(1)));
       } catch (error) {
-        if (error instanceof Error && error.message.includes('the client is offline')) {
-          console.error("Please check your Firebase configuration.");
+        if (error instanceof Error && (error.message.includes('the client is offline') || error.message.includes('unavailable'))) {
+          console.error("Firestore connection failed. Please check your Firebase configuration and internet connection.");
         }
       }
     };
@@ -2093,6 +2319,8 @@ export default function App() {
     const unsubUsers = onSnapshot(qUsers, (snapshot) => {
       const uList = snapshot.docs.map(d => d.data() as UserProfile);
       setUsers(uList);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'users');
     });
 
     return () => {
@@ -2390,19 +2618,22 @@ export default function App() {
             </div>
           </div>
           
-          {/* Daily Task Indicator */}
+          {/* Daily Task Button (Updated Design) */}
           <div className="relative">
             <button 
               onClick={() => !dailyTaskDone && setShowDailyTaskMessage(true)}
               className={cn(
-                "flex items-center gap-2 px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest transition-all border",
+                "p-2 rounded-xl transition-all border group relative",
                 dailyTaskDone 
                   ? "bg-green-50 border-green-200 text-green-600 cursor-default" 
-                  : "bg-red-50 border-red-200 text-red-600 hover:bg-red-100"
+                  : "bg-white border-slate-200 text-slate-600 hover:bg-red-50 hover:border-red-200 hover:text-red-600"
               )}
+              title={dailyTaskDone ? `Tarea: ${dailyTaskType}` : 'Registrar Tarea Diaria'}
             >
-              <ClipboardList className="w-3 h-3" />
-              {dailyTaskDone ? `Tarea: ${dailyTaskType}` : 'Tarea Diaria'}
+              {dailyTaskDone ? <CheckCircle2 className="w-5 h-5" /> : <ClipboardList className="w-5 h-5" />}
+              {!dailyTaskDone && (
+                <span className="absolute -top-1 -right-1 flex h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+              )}
             </button>
             
             <AnimatePresence>
@@ -2428,12 +2659,15 @@ export default function App() {
                               createdAt: serverTimestamp()
                             });
                             setShowDailyTaskMessage(false);
-                            // Show thank you message for 3 seconds
                             const toast = document.createElement('div');
-                            toast.className = "fixed bottom-8 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-6 py-3 rounded-2xl text-xs font-bold z-[100] shadow-2xl border border-white/10 text-center";
-                            toast.innerHTML = "¡Gracias por colaborar!<br/><span class='text-[10px] opacity-70'>Recuerda mantener el orden y la limpieza de tu área de trabajo.</span>";
+                            toast.className = "fixed bottom-12 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-8 py-5 rounded-3xl text-sm font-black z-[100] shadow-2xl border border-white/20 text-center min-w-[300px]";
+                            toast.innerHTML = "¡Gracias por colaborar!<br/><span class='text-xs opacity-80 font-medium mt-1 block'>Recuerda mantener el orden y la limpieza de tu área de trabajo.</span>";
                             document.body.appendChild(toast);
-                            setTimeout(() => toast.remove(), 3000);
+                            setTimeout(() => {
+                              toast.style.opacity = '0';
+                              toast.style.transition = 'opacity 0.5s ease';
+                              setTimeout(() => toast.remove(), 500);
+                            }, 5000);
                           } catch (e) {
                             console.error(e);
                           }
@@ -2476,10 +2710,24 @@ export default function App() {
               </button>
               <button 
                 onClick={() => setShowIncidentsManagement(true)}
-                className="p-2 hover:bg-slate-100 rounded-xl text-slate-600 transition-colors relative group"
+                className={cn(
+                  "p-2 hover:bg-slate-100 rounded-xl transition-colors relative group",
+                  incidents.some(i => {
+                    const yesterday = new Date();
+                    yesterday.setDate(yesterday.getDate() - 1);
+                    return i.createdAt?.toDate() > yesterday && i.status === 'abierta';
+                  }) ? "text-red-500" : "text-slate-600"
+                )}
                 title="Incidencias"
               >
                 <AlertTriangle className="w-5 h-5" />
+                {incidents.some(i => {
+                  const yesterday = new Date();
+                  yesterday.setDate(yesterday.getDate() - 1);
+                  return i.createdAt?.toDate() > yesterday && i.status === 'abierta';
+                }) && (
+                  <span className="absolute top-1 right-1 flex h-2 w-2 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]" />
+                )}
               </button>
               <button 
                 onClick={() => setShowUserManagement(true)}

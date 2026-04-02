@@ -100,14 +100,20 @@
       "description": "Reported incidents related to orders or processes",
       "type": "object",
       "properties": {
-        "type": { "type": "string", "enum": ["garantia", "recepcion", "tecnica"] },
-        "cardId": { "type": "string" },
+        "type": { "type": "string", "enum": ["garantia", "recepcion", "taller"] },
+        "orderNumber": { "type": "string" },
+        "referenceOrderNumber": { "type": "string" },
         "reportedBy": { "type": "string" },
+        "reportedByName": { "type": "string" },
+        "technicianId": { "type": "string" },
+        "technicianName": { "type": "string" },
+        "repairTechnicianId": { "type": "string" },
+        "repairTechnicianName": { "type": "string" },
         "description": { "type": "string" },
         "status": { "type": "string", "enum": ["abierta", "en_revision", "resuelta"] },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["type", "reportedBy", "description", "status", "createdAt"]
+      "required": ["type", "orderNumber", "reportedBy", "reportedByName", "description", "status", "createdAt"]
     },
     "Message": {
       "title": "Message",
