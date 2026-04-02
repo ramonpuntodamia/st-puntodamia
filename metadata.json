@@ -1,0 +1,5 @@
+{
+  "name": "ST Punto Damia",
+  "description": "Sistema de gestión de órdenes de trabajo con tablero Kanban y chat interno.",
+  "requestFramePermissions": []
+}

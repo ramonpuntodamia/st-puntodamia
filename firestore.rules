@@ -1,0 +1,267 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: boards
+    // Document ID: auto-generated
+    // Fields:
+    //   - name: string (required)
+    //   - ownerId: string (required)
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: columns
+    // Document ID: auto-generated
+    // Fields:
+    //   - boardId: string (required)
+    //   - name: string (required)
+    //   - order: number (required)
+    //
+    // Collection: cards
+    // Document ID: auto-generated
+    // Fields:
+    //   - columnId: string (required)
+    //   - boardId: string (required)
+    //   - title: string (required, size < 100)
+    //   - description: string (optional, size < 1000)
+    //   - order: number (required)
+    //   - lastMessageAt: timestamp (optional)
+    //   - createdAt: timestamp (required)
+    //   - currentStep: string (required, enum: ['recepcion', 'taller', 'reparacion', 'espera', 'finalizada'])
+    //   - tags: list (optional)
+    //   - assignedTechnicianId: string (optional)
+    //   - assignedTechnicianName: string (optional)
+    //   - finalizedAt: timestamp (optional)
+    //   - isRepaired: bool (optional)
+    //   - closingComment: string (optional)
+    //   - returnToStep: string (optional)
+    //   - history: list (optional)
+    //
+    // Collection: attendance
+    // Document ID: auto-generated
+    // Fields:
+    //   - userId: string (required)
+    //   - userName: string (required)
+    //   - date: string (required, YYYY-MM-DD)
+    //   - reason: string (required)
+    //   - justified: bool (required)
+    //   - note: string (optional)
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: dailyTasks
+    // Document ID: auto-generated
+    // Fields:
+    //   - userId: string (required)
+    //   - userName: string (required)
+    //   - date: string (required, YYYY-MM-DD)
+    //   - taskType: string (required, enum: ['BASURA', 'TRAPO TALLER', 'TRAPO COMEDOR', 'ESCOBA TALLER', 'ESCOBA COMEDOR', 'MICROONDAS', 'ESCALERA'])
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: userTasks
+    // Document ID: auto-generated
+    // Fields:
+    //   - userId: string (required)
+    //   - cardId: string (optional)
+    //   - description: string (required)
+    //   - timestamp: timestamp (required)
+    //
+    // Collection: incidents
+    // Document ID: auto-generated
+    // Fields:
+    //   - type: string (required, enum: ['garantia', 'recepcion', 'taller'])
+    //   - orderNumber: string (required)
+    //   - referenceOrderNumber: string (optional)
+    //   - reportedBy: string (required)
+    //   - reportedByName: string (required)
+    //   - technicianId: string (optional)
+    //   - technicianName: string (optional)
+    //   - repairTechnicianId: string (optional)
+    //   - repairTechnicianName: string (optional)
+    //   - description: string (required)
+    //   - status: string (required, enum: ['abierta', 'en_revision', 'resuelta'])
+    //   - createdAt: timestamp (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (
+          (request.auth.token.email == "ramonpuntodamia@gmail.com" && request.auth.token.email_verified == true) ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') == 'admin')
+        );
+    }
+
+    function isRecepcion() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'recepcion' || isAdmin());
+    }
+
+    function isTecnico() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'tecnico' || isAdmin());
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidCard(data) {
+      return hasRequiredFields(['columnId', 'boardId', 'title', 'order', 'createdAt', 'currentStep']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 100 &&
+             (!('description' in data) || (data.description == null || (data.description is string && data.description.size() < 1000))) &&
+             data.order is number &&
+             data.createdAt is timestamp &&
+             data.currentStep in ['recepcion', 'taller', 'reparacion', 'espera', 'finalizada'] &&
+             (!('tags' in data) || data.tags is list) &&
+             (!('assignedTechnicianId' in data) || data.assignedTechnicianId == null || data.assignedTechnicianId is string) &&
+             (!('assignedTechnicianName' in data) || data.assignedTechnicianName == null || data.assignedTechnicianName is string) &&
+             (!('finalizedAt' in data) || data.finalizedAt == null || data.finalizedAt is timestamp) &&
+             (!('isRepaired' in data) || data.isRepaired == null || data.isRepaired is bool) &&
+             (!('closingComment' in data) || data.closingComment == null || data.closingComment is string) &&
+             (!('returnToStep' in data) || data.returnToStep == null || data.returnToStep is string) &&
+             (!('lastMessageAt' in data) || data.lastMessageAt == null || data.lastMessageAt is timestamp) &&
+             (!('history' in data) || data.history is list);
+    }
+
+    function isValidAttendance(data) {
+      return hasRequiredFields(['userId', 'userName', 'date', 'reason', 'justified', 'createdAt']) &&
+             data.userId is string &&
+             data.userName is string &&
+             data.date.matches("^\\d{4}-\\d{2}-\\d{2}$") &&
+             data.reason is string &&
+             data.justified is bool &&
+             data.createdAt is timestamp &&
+             (!('note' in data) || data.note == null || data.note is string);
+    }
+
+    function isValidDailyTask(data) {
+      return hasRequiredFields(['userId', 'userName', 'date', 'taskType', 'createdAt']) &&
+             data.userId == request.auth.uid &&
+             data.userName is string &&
+             data.date.matches("^\\d{4}-\\d{2}-\\d{2}$") &&
+             data.taskType in ['BASURA', 'TRAPO TALLER', 'TRAPO COMEDOR', 'ESCOBA TALLER', 'ESCOBA COMEDOR', 'MICROONDAS', 'ESCALERA'] &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidUserTask(data) {
+      return hasRequiredFields(['userId', 'description', 'timestamp']) &&
+             data.userId == request.auth.uid &&
+             data.description is string && data.description.size() > 0 &&
+             data.timestamp is timestamp;
+    }
+
+    function isValidIncident(data) {
+      return hasRequiredFields(['type', 'orderNumber', 'reportedBy', 'reportedByName', 'status', 'createdAt', 'description']) &&
+             data.type in ['garantia', 'recepcion', 'taller'] &&
+             data.reportedBy is string &&
+             data.reportedByName is string &&
+             data.orderNumber is string &&
+             data.status in ['abierta', 'en_revision', 'resuelta'] &&
+             data.createdAt is timestamp &&
+             data.description is string && data.description.size() > 0 &&
+             (!('referenceOrderNumber' in data) || data.referenceOrderNumber == null || data.referenceOrderNumber is string) &&
+             (!('technicianId' in data) || data.technicianId == null || data.technicianId is string) &&
+             (!('technicianName' in data) || data.technicianName == null || data.technicianName is string) &&
+             (!('repairTechnicianId' in data) || data.repairTechnicianId == null || data.repairTechnicianId is string) &&
+             (!('repairTechnicianName' in data) || data.repairTechnicianName == null || data.repairTechnicianName is string);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isOwner(userId) && hasRequiredFields(['uid', 'role']) && request.resource.data.role in ['recepcion', 'tecnico', 'admin'];
+      allow update: if (isOwner(userId) || isAdmin()) && hasRequiredFields(['uid', 'role']);
+    }
+
+    match /boards/{boardId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /columns/{columnId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /userReadStatus/{statusId} {
+      allow read: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid || isAdmin());
+      allow create, update: if isAuthenticated() && hasRequiredFields(['userId', 'cardId', 'lastReadAt']) && request.resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    match /cards/{cardId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isRecepcion() && isValidCard(request.resource.data);
+      allow update: if isAuthenticated() && (
+        isAdmin() ||
+        (isRecepcion() && isValidCard(request.resource.data)) ||
+        (isTecnico() && isValidCard(request.resource.data) && (
+          // Technician can only update cards assigned to them or if it's a message update
+          resource.data.assignedTechnicianId == request.auth.uid ||
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastMessageAt'])
+        ))
+      );
+      allow delete: if isAuthenticated() && isAdmin();
+      
+      match /messages/{messageId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated() && hasRequiredFields(['cardId', 'senderId', 'senderName', 'text', 'createdAt']) && request.resource.data.senderId == request.auth.uid;
+        allow delete: if isAuthenticated() && (resource.data.senderId == request.auth.uid || isAdmin());
+      }
+    }
+
+    match /attendance/{attendanceId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create, update, delete: if isAdmin() && isValidAttendance(request.resource.data);
+    }
+
+    match /dailyTasks/{taskId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isValidDailyTask(request.resource.data);
+      allow update, delete: if isAdmin();
+    }
+
+    match /userTasks/{taskId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isValidUserTask(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && isValidUserTask(request.resource.data);
+      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    match /incidents/{incidentId} {
+      allow read, write: if isAdmin();
+      allow create: if isAuthenticated() && isValidIncident(request.resource.data);
+    }
+
+    // Default deny
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}

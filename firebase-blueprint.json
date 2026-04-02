@@ -1,0 +1,175 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "recepcion", "tecnico"] }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Board": {
+      "title": "Board",
+      "description": "A Kanban board",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "ownerId"]
+    },
+    "Column": {
+      "title": "Column",
+      "description": "A column in a Kanban board",
+      "type": "object",
+      "properties": {
+        "boardId": { "type": "string" },
+        "name": { "type": "string" },
+        "order": { "type": "number" }
+      },
+      "required": ["boardId", "name", "order"]
+    },
+    "Card": {
+      "title": "Card",
+      "description": "A card in a Kanban column representing a service order",
+      "type": "object",
+      "properties": {
+        "columnId": { "type": "string" },
+        "boardId": { "type": "string" },
+        "title": { "type": "string", "description": "Order Number or Title" },
+        "description": { "type": "string", "description": "Initial problem description" },
+        "order": { "type": "number" },
+        "lastMessageAt": { "type": "string", "format": "date-time" },
+        "assignedTechnicianId": { "type": "string" },
+        "assignedTechnicianName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "currentStep": { "type": "string", "enum": ["recepcion", "taller", "reparacion", "espera", "finalizada"] },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "finalizedAt": { "type": "string", "format": "date-time" },
+        "isRepaired": { "type": "boolean" },
+        "closingComment": { "type": "string" },
+        "returnToStep": { "type": "string" },
+        "history": { 
+          "type": "array", 
+          "items": { 
+            "type": "object",
+            "properties": {
+              "step": { "type": "string" },
+              "timestamp": { "type": "string", "format": "date-time" },
+              "userId": { "type": "string" }
+            }
+          }
+        }
+      },
+      "required": ["columnId", "boardId", "title", "order", "createdAt", "currentStep"]
+    },
+    "Attendance": {
+      "title": "Attendance",
+      "description": "User attendance and punctuality records",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "date": { "type": "string", "description": "YYYY-MM-DD" },
+        "checkIn": { "type": "string", "format": "date-time" },
+        "checkOut": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["presente", "tarde", "ausente"] },
+        "minutesLate": { "type": "number" }
+      },
+      "required": ["userId", "date", "status"]
+    },
+    "UserTask": {
+      "title": "UserTask",
+      "description": "Daily tasks performed by users",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "cardId": { "type": "string" },
+        "description": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "description", "timestamp"]
+    },
+    "Incident": {
+      "title": "Incident",
+      "description": "Reported incidents related to orders or processes",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["garantia", "recepcion", "tecnica"] },
+        "cardId": { "type": "string" },
+        "reportedBy": { "type": "string" },
+        "description": { "type": "string" },
+        "status": { "type": "string", "enum": ["abierta", "en_revision", "resuelta"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["type", "reportedBy", "description", "status", "createdAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A message in a card's chat",
+      "type": "object",
+      "properties": {
+        "cardId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["cardId", "senderId", "text", "createdAt"]
+    },
+    "UserReadStatus": {
+      "title": "UserReadStatus",
+      "description": "Tracks when a user last read a card's chat",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "cardId": { "type": "string" },
+        "lastReadAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "cardId", "lastReadAt"]
+    }
+  },
+  "firestore": {
+    "/boards/{boardId}": {
+      "schema": "Board",
+      "description": "Kanban boards"
+    },
+    "/columns/{columnId}": {
+      "schema": "Column",
+      "description": "Fixed columns: Orden en Recepción, Orden En Taller, Orden En Reparación, Orden En Espera, Orden Finalizada"
+    },
+    "/cards/{cardId}": {
+      "schema": "Card",
+      "description": "Cards within columns"
+    },
+    "/cards/{cardId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Messages within a card's chat"
+    },
+    "/userReadStatus/{statusId}": {
+      "schema": "UserReadStatus",
+      "description": "User read status for cards"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/attendance/{attendanceId}": {
+      "schema": "Attendance",
+      "description": "User attendance records"
+    },
+    "/userTasks/{taskId}": {
+      "schema": "UserTask",
+      "description": "Daily user task logs"
+    },
+    "/incidents/{incidentId}": {
+      "schema": "Incident",
+      "description": "Reported incidents"
+    }
+  }
+}
