@@ -2013,8 +2013,16 @@ const UserManagementModal = ({ onClose, users }: UserManagementModalProps) => {
       for (const d of incidentsSnap.docs) {
         await deleteDoc(doc(db, 'incidents', d.id));
       }
+
+      // 4. Delete all columns
+      const colsSnap = await getDocs(collection(db, 'columns'));
+      for (const d of colsSnap.docs) {
+        await deleteDoc(doc(db, 'columns', d.id));
+      }
       
       console.log("System Reset Successful");
+      // Trigger re-creation of default columns
+      createDefaultColumns();
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, 'system-reset');
     }
@@ -2130,6 +2138,25 @@ const UserManagementModal = ({ onClose, users }: UserManagementModalProps) => {
       </AnimatePresence>
     </>
   );
+};
+
+const createDefaultColumns = async () => {
+  const defaults = [
+    { id: 'recepcion', name: 'Orden en Recepción' },
+    { id: 'taller', name: 'Orden En Taller' },
+    { id: 'reparacion', name: 'Orden En Reparación' },
+    { id: 'espera', name: 'Orden En Espera' },
+    { id: 'finalizada', name: 'Orden Finalizada' }
+  ];
+
+  for (let i = 0; i < defaults.length; i++) {
+    const col = defaults[i];
+    await setDoc(doc(db, 'columns', col.id), {
+      name: col.name,
+      order: i,
+      boardId: 'default'
+    }, { merge: true });
+  }
 };
 
 export default function App() {
@@ -2305,6 +2332,43 @@ export default function App() {
     // Initial check to create columns if empty
     createDefaultColumns();
 
+    // Cleanup duplicates (one-time check for old auto-generated IDs)
+    const cleanupDuplicates = async () => {
+      const q = query(collection(db, 'columns'));
+      const snapshot = await getDocs(q);
+      const deterministicIds = ['recepcion', 'taller', 'reparacion', 'espera', 'finalizada'];
+      
+      const nameToId: Record<string, string> = {
+        'orden en recepción': 'recepcion',
+        'orden en taller': 'taller',
+        'orden en reparación': 'reparacion',
+        'orden en espera': 'espera',
+        'orden finalizada': 'finalizada'
+      };
+
+      for (const d of snapshot.docs) {
+        if (!deterministicIds.includes(d.id)) {
+          const colData = d.data();
+          const normalizedName = (colData.name || '').toLowerCase();
+          const newId = nameToId[normalizedName];
+          
+          if (newId) {
+            // Migrate cards from this old column to the new one
+            const cardsQ = query(collection(db, 'cards'), where('columnId', '==', d.id));
+            const cardsSnap = await getDocs(cardsQ);
+            for (const cardDoc of cardsSnap.docs) {
+              await updateDoc(doc(db, 'cards', cardDoc.id), {
+                columnId: newId
+              });
+            }
+          }
+          // If it's an old auto-generated ID, delete it
+          await deleteDoc(doc(db, 'columns', d.id));
+        }
+      }
+    };
+    cleanupDuplicates();
+
     // Fetch Cards
     const qCards = query(collection(db, 'cards'), orderBy('order', 'asc'));
     const unsubCards = onSnapshot(qCards, (snapshot) => {
@@ -2330,28 +2394,6 @@ export default function App() {
     };
   }, [user]);
 
-  const createDefaultColumns = async () => {
-    // Check if columns already exist to prevent duplicates
-    const q = query(collection(db, 'columns'));
-    const snapshot = await getDocs(q);
-    if (snapshot.docs.length > 0) return;
-
-    const defaults = [
-      'Orden en Recepción',
-      'Orden En Taller',
-      'Orden En Reparación',
-      'Orden En Espera',
-      'Orden Finalizada'
-    ];
-    for (let i = 0; i < defaults.length; i++) {
-      await addDoc(collection(db, 'columns'), {
-        name: defaults[i],
-        order: i,
-        boardId: 'default'
-      });
-    }
-  };
-
   const handleCreateCard = async () => {
     if (!newCardTitle.trim()) return;
     
@@ -2362,7 +2404,7 @@ export default function App() {
       return;
     }
 
-    const receptionCol = columns.find(c => c.name === 'Orden en Recepción') || columns[0];
+    const receptionCol = columns.find(c => c.id === 'recepcion') || columns[0];
     if (!receptionCol) return;
 
     try {
@@ -2408,7 +2450,7 @@ export default function App() {
   };
 
   const handleRecibir = async (card: CardType) => {
-    const tallerCol = columns.find(c => c.name === 'Orden En Taller');
+    const tallerCol = columns.find(c => c.id === 'taller');
     if (!tallerCol) return;
 
     try {
@@ -2428,7 +2470,7 @@ export default function App() {
   };
 
   const handleAsignarTecnico = async (card: CardType, techId: string, techName: string) => {
-    const reparacionCol = columns.find(c => c.name === 'Orden En Reparación');
+    const reparacionCol = columns.find(c => c.id === 'reparacion');
     if (!reparacionCol) return;
 
     try {
@@ -2450,7 +2492,7 @@ export default function App() {
   };
 
   const handlePausar = async (card: CardType, comment: string) => {
-    const esperaCol = columns.find(c => c.name === 'Orden En Espera');
+    const esperaCol = columns.find(c => c.id === 'espera');
     if (!esperaCol) return;
 
     try {
@@ -2473,7 +2515,7 @@ export default function App() {
   };
 
   const handleReanudar = async (card: CardType, comment: string) => {
-    const reparacionCol = columns.find(c => c.name === 'Orden En Reparación');
+    const reparacionCol = columns.find(c => c.id === 'reparacion');
     if (!reparacionCol) return;
 
     try {
@@ -2495,7 +2537,7 @@ export default function App() {
   };
 
   const handleFinalizar = async (card: CardType, isRepaired: boolean, comment: string) => {
-    const finalizadaCol = columns.find(c => c.name === 'Orden Finalizada');
+    const finalizadaCol = columns.find(c => c.id === 'finalizada');
     if (!finalizadaCol) return;
 
     try {
