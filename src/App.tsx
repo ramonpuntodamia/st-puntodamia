@@ -2278,8 +2278,8 @@ export default function App() {
             email: user.email || existingData.email || '',
             displayName: user.displayName || existingData.displayName || '',
             photoURL: user.photoURL || existingData.photoURL || '',
-            // Ensure role exists, default to admin for owner or recepcion for others
-            role: existingData.role || (isAdminEmail ? 'admin' : 'recepcion')
+            // Force admin for owner, otherwise keep or default
+            role: isAdminEmail ? 'admin' : (existingData.role || 'recepcion')
           };
           
           try {
@@ -2901,7 +2901,7 @@ export default function App() {
               onOpenDetail={(card) => setActiveChat(card)}
               onRecibir={handleRecibir}
               onAsignar={handleAsignarTecnico}
-              technicians={users.filter(u => u.role === 'tecnico')}
+              technicians={users.filter(u => u.role === 'tecnico' || u.role === 'admin')}
             />
           );
         })}
