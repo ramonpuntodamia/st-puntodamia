@@ -60,7 +60,6 @@ import {
   Check,
   Download
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
 import { cn } from './lib/utils';
 import jsPDF from 'jspdf';
@@ -147,12 +146,13 @@ const formatTimestamp = (ts: any, formatStr: string) => {
 
 const Countdown = ({ createdAt, finalizedAt }: { createdAt: Timestamp; finalizedAt?: Timestamp }) => {
   const [timeLeft, setTimeLeft] = useState<string>('24:00:00');
-  const [isUrgent, setIsUrgent] = useState(false);
+  const [status, setStatus] = useState<'normal' | 'urgent' | 'critical'>('normal');
 
   useEffect(() => {
     if (!createdAt) return;
     if (finalizedAt) {
       setTimeLeft('DETENIDO');
+      setStatus('normal');
       return;
     }
 
@@ -164,7 +164,7 @@ const Countdown = ({ createdAt, finalizedAt }: { createdAt: Timestamp; finalized
 
       if (diff <= 0) {
         setTimeLeft('00:00:00');
-        setIsUrgent(true);
+        setStatus('critical');
         clearInterval(timer);
         return;
       }
@@ -177,7 +177,13 @@ const Countdown = ({ createdAt, finalizedAt }: { createdAt: Timestamp; finalized
         `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
       );
       
-      if (hours < 4) setIsUrgent(true);
+      if (hours < 2) {
+        setStatus('critical');
+      } else if (hours < 4) {
+        setStatus('urgent');
+      } else {
+        setStatus('normal');
+      }
     }, 1000);
 
     return () => clearInterval(timer);
@@ -185,12 +191,15 @@ const Countdown = ({ createdAt, finalizedAt }: { createdAt: Timestamp; finalized
 
   return (
     <div className={cn(
-      "flex items-center gap-1.5 px-2 py-1 rounded-lg border font-mono text-[10px] font-black tracking-tighter",
+      "flex items-center gap-1.5 px-2 py-1 rounded-lg border font-mono text-[10px] font-black tracking-tighter transition-colors",
       finalizedAt ? "bg-slate-100 border-slate-200 text-slate-400" :
-      isUrgent ? "bg-red-50 border-red-200 text-red-600 animate-pulse" : "bg-blue-50 border-blue-200 text-[#00aeef]"
+      status === 'critical' ? "bg-red-600 border-red-700 text-white" :
+      status === 'urgent' ? "bg-amber-50 border-amber-200 text-amber-600" : 
+      "bg-blue-50 border-blue-200 text-[#00aeef]"
     )}>
-      <RefreshCw className={cn("w-3 h-3", !finalizedAt && "animate-spin-slow")} />
+      {status === 'critical' ? <AlertTriangle className="w-3 h-3 animate-pulse" /> : <RefreshCw className="w-3 h-3" />}
       <span>{timeLeft}</span>
+      {status === 'critical' && <span className="ml-1 animate-pulse">!</span>}
     </div>
   );
 };
@@ -243,13 +252,33 @@ const Card = ({
   const isTaller = card.currentStep === 'taller';
   const isFinalizada = card.currentStep === 'finalizada';
 
+  const [isCritical, setIsCritical] = useState(false);
+
+  useEffect(() => {
+    if (isFinalizada) {
+      setIsCritical(false);
+      return;
+    }
+
+    const checkCritical = () => {
+      const now = Date.now();
+      const start = card.createdAt.toDate().getTime();
+      const deadline = start + (24 * 60 * 60 * 1000);
+      const diff = deadline - now;
+      const critical = diff > 0 && diff <= 2 * 60 * 60 * 1000;
+      if (critical !== isCritical) setIsCritical(critical);
+    };
+
+    checkCritical();
+    const timer = setInterval(checkCritical, 30000); // Check every 30s
+    return () => clearInterval(timer);
+  }, [card.createdAt, isFinalizada, isCritical]);
+
   return (
-    <motion.div 
-      layout
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
+    <div 
       className={cn(
-        "bg-white p-4 rounded-2xl border border-slate-300 shadow-sm group hover:border-[#00aeef]/30 transition-all cursor-pointer relative overflow-hidden",
+        "bg-white p-4 rounded-xl border transition-all cursor-pointer relative overflow-hidden",
+        isCritical ? "border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.15)] ring-1 ring-red-500" : "border-slate-300 shadow-sm hover:border-[#00aeef]/50",
         isFinalizada && "opacity-75 grayscale-[0.5]"
       )}
       onClick={onOpenDetail}
@@ -282,7 +311,7 @@ const Card = ({
       {/* Title & Chat Notification */}
       <div className="flex justify-between items-start mb-4">
         <div>
-          <h4 className="text-sm font-black text-slate-950 group-hover:text-[#00aeef] transition-colors tracking-tight leading-tight">
+          <h4 className="text-sm font-black text-slate-950 tracking-tight leading-tight">
             {card.title}
           </h4>
           <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mt-1">
@@ -293,7 +322,7 @@ const Card = ({
           <div className="relative">
             <MessageSquare className={cn("w-4 h-4", hasUnread ? "text-[#00aeef]" : "text-slate-300")} />
             {hasUnread && (
-              <span className="absolute -top-1 -right-1 flex h-2 w-2 rounded-full bg-[#00aeef] shadow-[0_0_10px_rgba(0,174,239,0.5)] animate-pulse" />
+              <span className="absolute -top-1 -right-1 flex h-2 w-2 rounded-full bg-[#00aeef]" />
             )}
           </div>
         )}
@@ -323,7 +352,7 @@ const Card = ({
         {isRecepcion && (userProfile?.role === 'recepcion' || userProfile?.role === 'admin') && (
           <button 
             onClick={onRecibir}
-            className="w-full py-2 bg-[#00aeef] hover:bg-[#0088cc] text-white text-[10px] font-black uppercase tracking-[0.2em] rounded-xl transition-all active:scale-95 shadow-lg shadow-[#00aeef]/10"
+            className="w-full py-2 bg-[#00aeef] hover:bg-[#0088cc] text-white text-[10px] font-black uppercase tracking-[0.2em] rounded-xl"
           >
             Recibir
           </button>
@@ -331,7 +360,7 @@ const Card = ({
 
         {isTaller && (userProfile?.role === 'admin') && (
           <select 
-            className="w-full py-2 bg-white border border-slate-300 rounded-xl text-[10px] font-bold text-slate-800 focus:outline-none focus:border-[#00aeef]/50 transition-all cursor-pointer"
+            className="w-full py-2 bg-white border border-slate-300 rounded-xl text-[10px] font-bold text-slate-800 focus:outline-none focus:border-[#00aeef]/50 cursor-pointer"
             onChange={(e) => {
               const tech = technicians.find(t => t.uid === e.target.value);
               if (tech) onAsignar(tech.uid, tech.displayName || 'Técnico');
@@ -346,7 +375,7 @@ const Card = ({
           </select>
         )}
       </div>
-    </motion.div>
+    </div>
   );
 };
 
@@ -373,10 +402,10 @@ const Column = ({
   technicians
 }: ColumnProps) => {
   return (
-    <div className="flex flex-col flex-1 min-w-[220px] max-w-[280px] h-full bg-slate-100/50 rounded-3xl border border-slate-300 overflow-hidden backdrop-blur-sm">
-      <div className="p-5 flex items-center justify-between bg-white/50 border-b border-slate-300">
+    <div className="flex flex-col flex-1 min-w-[220px] max-w-[280px] h-full bg-slate-200/50 rounded-xl border border-slate-300 overflow-hidden">
+      <div className="p-5 flex items-center justify-between bg-white/80 border-b border-slate-300">
         <div className="flex items-center gap-3">
-          <div className="w-1.5 h-4 bg-[#00aeef] rounded-full shadow-[0_0_8px_rgba(0,174,239,0.4)]"></div>
+          <div className="w-1.5 h-4 bg-[#00aeef] rounded-full"></div>
           <h3 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.3em]">{column.name}</h3>
           <span className="px-2 py-0.5 rounded-full bg-slate-100 border border-slate-300 text-[10px] text-slate-700 font-bold">
             {cards.length}
@@ -385,25 +414,23 @@ const Column = ({
       </div>
       
       <div className="flex-1 overflow-y-auto p-5 space-y-4 scrollbar-none">
-        <AnimatePresence mode="popLayout">
-          {cards.map(card => (
-            <Card 
-              key={card.id} 
-              card={card} 
-              user={user} 
-              userProfile={userProfile}
-              onOpenDetail={() => onOpenDetail(card)}
-              onRecibir={(e) => {
-                e.stopPropagation();
-                onRecibir(card);
-              }}
-              onAsignar={(techId, techName) => onAsignar(card, techId, techName)}
-              technicians={technicians}
-            />
-          ))}
-        </AnimatePresence>
+        {cards.map(card => (
+          <Card 
+            key={card.id} 
+            card={card} 
+            user={user} 
+            userProfile={userProfile}
+            onOpenDetail={() => onOpenDetail(card)}
+            onRecibir={(e) => {
+              e.stopPropagation();
+              onRecibir(card);
+            }}
+            onAsignar={(techId, techName) => onAsignar(card, techId, techName)}
+            technicians={technicians}
+          />
+        ))}
         {cards.length === 0 && (
-          <div className="h-32 flex flex-col items-center justify-center border-2 border-dashed border-slate-300 rounded-3xl text-slate-500">
+          <div className="h-32 flex flex-col items-center justify-center border-2 border-dashed border-slate-300 rounded-xl text-slate-500">
             <span className="text-[10px] uppercase tracking-[0.2em] font-bold opacity-50">Vacío</span>
           </div>
         )}
@@ -497,22 +524,13 @@ const CardDetailModal = ({
   const decisionLog = card.history?.filter(h => h.comment || ['espera', 'reparacion', 'finalizada'].includes(h.step)) || [];
 
   return (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <motion.div 
-        initial={{ scale: 0.9, opacity: 0, y: 20 }}
-        animate={{ scale: 1, opacity: 1, y: 0 }}
-        exit={{ scale: 0.9, opacity: 0, y: 20 }}
-        className="bg-white w-full max-w-5xl h-[85vh] rounded-3xl border border-slate-300 shadow-2xl flex flex-col overflow-hidden"
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
+      <div 
+        className="bg-white w-full max-w-5xl h-[85vh] rounded-xl border border-slate-300 shadow-xl flex flex-col overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="p-6 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
+        <div className="p-6 border-b border-slate-200 flex items-center justify-between bg-slate-50">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 bg-[#00aeef]/10 rounded-2xl flex items-center justify-center border border-[#00aeef]/20">
               <Layout className="w-6 h-6 text-[#00aeef]" />
@@ -703,55 +721,48 @@ const CardDetailModal = ({
         </div>
 
         {/* Finalize Confirmation Overlay */}
-        <AnimatePresence>
-          {showFinalizeForm && (
-            <motion.div 
-              initial={{ opacity: 0, scale: 1.1 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 1.1 }}
-              className="absolute inset-0 z-50 bg-white/90 backdrop-blur-md p-8 flex flex-col items-center justify-center text-center"
-            >
-              <div className="max-w-md w-full space-y-8">
-                <div className="w-20 h-20 bg-green-100 rounded-3xl flex items-center justify-center mx-auto border border-green-200">
-                  <CheckCircle2 className="w-10 h-10 text-green-500" />
-                </div>
-                <div className="space-y-2">
-                  <h3 className="text-3xl font-black text-slate-950 tracking-tight">Confirmar Cierre</h3>
-                  <p className="text-slate-600 text-sm">¿Cuál fue el resultado final de la reparación?</p>
-                </div>
-                
-                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-left">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Comentario de Cierre</p>
-                  <p className="text-sm text-slate-800 italic">"{actionComment}"</p>
-                </div>
+        {showFinalizeForm && (
+          <div className="absolute inset-0 z-50 bg-white/90 p-8 flex flex-col items-center justify-center text-center">
+            <div className="max-w-md w-full space-y-8">
+              <div className="w-20 h-20 bg-green-100 rounded-xl flex items-center justify-center mx-auto border border-green-200">
+                <CheckCircle2 className="w-10 h-10 text-green-500" />
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-3xl font-black text-slate-950 tracking-tight">Confirmar Cierre</h3>
+                <p className="text-slate-600 text-sm">¿Cuál fue el resultado final de la reparación?</p>
+              </div>
+              
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-left">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Comentario de Cierre</p>
+                <p className="text-sm text-slate-800 italic">"{actionComment}"</p>
+              </div>
 
-                <div className="flex gap-3">
-                  <button 
-                    onClick={() => onFinalizar(true, actionComment)}
-                    className="flex-1 py-4 bg-green-500 text-white font-black rounded-2xl hover:bg-green-600 transition-all shadow-lg shadow-green-500/20"
-                  >
-                    Reparado
-                  </button>
-                  <button 
-                    onClick={() => onFinalizar(false, actionComment)}
-                    className="flex-1 py-4 bg-slate-200 text-slate-700 font-black rounded-2xl hover:bg-slate-300 transition-all"
-                  >
-                    No Reparado
-                  </button>
-                </div>
-                
+              <div className="flex gap-3">
                 <button 
-                  onClick={() => setShowFinalizeForm(false)}
-                  className="text-xs font-bold text-slate-500 hover:text-slate-700 uppercase tracking-widest"
+                  onClick={() => onFinalizar(true, actionComment)}
+                  className="flex-1 py-4 bg-green-500 text-white font-black rounded-xl hover:bg-green-600"
                 >
-                  Volver al detalle
+                  Reparado
+                </button>
+                <button 
+                  onClick={() => onFinalizar(false, actionComment)}
+                  className="flex-1 py-4 bg-slate-200 text-slate-700 font-black rounded-xl hover:bg-slate-300"
+                >
+                  No Reparado
                 </button>
               </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </motion.div>
-    </motion.div>
+              
+              <button 
+                onClick={() => setShowFinalizeForm(false)}
+                className="text-xs font-bold text-slate-500 hover:text-slate-700 uppercase tracking-widest"
+              >
+                Volver al detalle
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 };
 
@@ -809,23 +820,14 @@ const AttendanceManagementModal = ({ onClose, users }: AttendanceManagementModal
   };
 
   return (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <motion.div 
-        initial={{ scale: 0.9, opacity: 0, y: 20 }}
-        animate={{ scale: 1, opacity: 1, y: 0 }}
-        exit={{ scale: 0.9, opacity: 0, y: 20 }}
-        className="bg-white w-full max-w-4xl h-[80vh] rounded-3xl border border-slate-300 shadow-2xl flex flex-col overflow-hidden"
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
+      <div 
+        className="bg-white w-full max-w-4xl h-[80vh] rounded-xl border border-slate-300 shadow-xl flex flex-col overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
-        <div className="p-6 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
+        <div className="p-6 border-b border-slate-200 flex items-center justify-between bg-slate-50">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-[#00aeef]/10 rounded-2xl flex items-center justify-center border border-[#00aeef]/20">
+            <div className="w-12 h-12 bg-[#00aeef]/10 rounded-xl flex items-center justify-center border border-[#00aeef]/20">
               <CalendarCheck className="w-6 h-6 text-[#00aeef]" />
             </div>
             <div>
@@ -836,12 +838,12 @@ const AttendanceManagementModal = ({ onClose, users }: AttendanceManagementModal
           <div className="flex items-center gap-2">
             <button 
               onClick={() => setShowForm(!showForm)}
-              className="px-4 py-2 bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-slate-800 transition-all flex items-center gap-2"
+              className="px-4 py-2 bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-slate-800 flex items-center gap-2"
             >
               {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
               {showForm ? 'Cancelar' : 'Registrar Novedad'}
             </button>
-            <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full text-slate-600 hover:text-slate-800 transition-colors">
+            <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full text-slate-600">
               <X className="w-6 h-6" />
             </button>
           </div>
@@ -965,8 +967,8 @@ const AttendanceManagementModal = ({ onClose, users }: AttendanceManagementModal
             </div>
           )}
         </div>
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   );
 };
 
@@ -1003,23 +1005,14 @@ const UserActivityModal = ({ onClose, user }: UserActivityModalProps) => {
   }, [user.uid]);
 
   return (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <motion.div 
-        initial={{ scale: 0.9, opacity: 0, y: 20 }}
-        animate={{ scale: 1, opacity: 1, y: 0 }}
-        exit={{ scale: 0.9, opacity: 0, y: 20 }}
-        className="bg-white w-full max-w-4xl h-[80vh] rounded-3xl border border-slate-300 shadow-2xl flex flex-col overflow-hidden"
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
+      <div 
+        className="bg-white w-full max-w-4xl h-[80vh] rounded-xl border border-slate-300 shadow-xl flex flex-col overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
-        <div className="p-6 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
+        <div className="p-6 border-b border-slate-200 flex items-center justify-between bg-slate-50">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-[#00aeef]/10 rounded-2xl flex items-center justify-center border border-[#00aeef]/20">
+            <div className="w-12 h-12 bg-[#00aeef]/10 rounded-xl flex items-center justify-center border border-[#00aeef]/20">
               <Activity className="w-6 h-6 text-[#00aeef]" />
             </div>
             <div>
@@ -1027,7 +1020,7 @@ const UserActivityModal = ({ onClose, user }: UserActivityModalProps) => {
               <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Progreso y registros personales</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full text-slate-600 hover:text-slate-800 transition-colors">
+          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full text-slate-600">
             <X className="w-6 h-6" />
           </button>
         </div>
@@ -1128,8 +1121,8 @@ const UserActivityModal = ({ onClose, user }: UserActivityModalProps) => {
             </>
           )}
         </div>
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   );
 };
 
@@ -1329,18 +1322,9 @@ const KPIModal = ({ onClose, users }: KPIModalProps) => {
   };
 
   return (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <motion.div 
-        initial={{ scale: 0.9, opacity: 0, y: 20 }}
-        animate={{ scale: 1, opacity: 1, y: 0 }}
-        exit={{ scale: 0.9, opacity: 0, y: 20 }}
-        className="bg-white w-full max-w-6xl h-[90vh] rounded-3xl border border-slate-300 shadow-2xl flex flex-col overflow-hidden"
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
+      <div 
+        className="bg-white w-full max-w-6xl h-[90vh] rounded-xl border border-slate-300 shadow-xl flex flex-col overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
         <div className="p-6 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
@@ -1562,8 +1546,8 @@ const KPIModal = ({ onClose, users }: KPIModalProps) => {
             </div>
           )}
         </div>
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   );
 };
 
@@ -1659,18 +1643,9 @@ const IncidentsManagementModal = ({ onClose, users, user }: IncidentsManagementM
   };
 
   return (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <motion.div 
-        initial={{ scale: 0.9, opacity: 0, y: 20 }}
-        animate={{ scale: 1, opacity: 1, y: 0 }}
-        exit={{ scale: 0.9, opacity: 0, y: 20 }}
-        className="bg-white w-full max-w-5xl h-[85vh] rounded-3xl border border-slate-300 shadow-2xl flex flex-col overflow-hidden"
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
+      <div 
+        className="bg-white w-full max-w-5xl h-[85vh] rounded-xl border border-slate-300 shadow-xl flex flex-col overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
         <div className="p-6 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
@@ -1880,8 +1855,8 @@ const IncidentsManagementModal = ({ onClose, users, user }: IncidentsManagementM
             </div>
           )}
         </div>
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   );
 };
 
@@ -1909,18 +1884,9 @@ const ResetSystemModal = ({ onClose, onConfirm }: ResetSystemModalProps) => {
   };
 
   return (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md"
-      onClick={onClose}
-    >
-      <motion.div 
-        initial={{ scale: 0.9, opacity: 0, y: 20 }}
-        animate={{ scale: 1, opacity: 1, y: 0 }}
-        exit={{ scale: 0.9, opacity: 0, y: 20 }}
-        className="bg-white w-full max-w-md rounded-3xl border border-red-100 shadow-2xl flex flex-col overflow-hidden"
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/70" onClick={onClose}>
+      <div 
+        className="bg-white w-full max-w-md rounded-xl border border-red-100 shadow-xl flex flex-col overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
         <div className="p-8 text-center space-y-6">
@@ -1965,8 +1931,8 @@ const ResetSystemModal = ({ onClose, onConfirm }: ResetSystemModalProps) => {
             </div>
           </div>
         </div>
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   );
 };
 
@@ -2030,18 +1996,9 @@ const UserManagementModal = ({ onClose, users }: UserManagementModalProps) => {
 
   return (
     <>
-      <motion.div 
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
-        onClick={onClose}
-      >
-        <motion.div 
-          initial={{ scale: 0.9, opacity: 0, y: 20 }}
-          animate={{ scale: 1, opacity: 1, y: 0 }}
-          exit={{ scale: 0.9, opacity: 0, y: 20 }}
-          className="bg-white w-full max-w-2xl h-[85vh] rounded-3xl border border-slate-300 shadow-2xl flex flex-col overflow-hidden"
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
+        <div 
+          className="bg-white w-full max-w-2xl h-[85vh] rounded-xl border border-slate-300 shadow-xl flex flex-col overflow-hidden"
           onClick={e => e.stopPropagation()}
         >
           <div className="p-6 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
@@ -2125,17 +2082,15 @@ const UserManagementModal = ({ onClose, users }: UserManagementModalProps) => {
               </button>
             </div>
           </div>
-        </motion.div>
-      </motion.div>
+        </div>
+      </div>
 
-      <AnimatePresence>
-        {showResetConfirm && (
-          <ResetSystemModal 
-            onClose={() => setShowResetConfirm(false)}
-            onConfirm={handleResetSystem}
-          />
-        )}
-      </AnimatePresence>
+      {showResetConfirm && (
+        <ResetSystemModal 
+          onClose={() => setShowResetConfirm(false)}
+          onConfirm={handleResetSystem}
+        />
+      )}
     </>
   );
 };
@@ -2585,14 +2540,10 @@ export default function App() {
   if (!user) {
     return (
       <div className="min-h-screen bg-white flex flex-col items-center justify-center p-4">
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="max-w-md w-full text-center space-y-10"
-        >
+        <div className="max-w-md w-full text-center space-y-10">
           {/* Logo Punto Damia */}
           <div className="flex justify-center">
-            <div className="w-24 h-24 bg-[#00aeef] rounded-full flex items-center justify-center shadow-[0_0_40px_rgba(0,174,239,0.3)]">
+            <div className="w-24 h-24 bg-[#00aeef] rounded-full flex items-center justify-center shadow-lg">
               <div className="w-14 h-14 border-[6px] border-white rounded-full flex items-center justify-center">
                 <div className="w-5 h-5 bg-white rounded-full ml-2"></div>
               </div>
@@ -2610,7 +2561,7 @@ export default function App() {
           <div className="pt-4">
             <button 
               onClick={handleLogin}
-              className="w-full bg-slate-900 text-white font-bold py-4 rounded-2xl hover:bg-slate-800 transition-all active:scale-[0.98] flex items-center justify-center gap-3 shadow-xl"
+              className="w-full bg-slate-900 text-white font-bold py-4 rounded-xl hover:bg-slate-800 flex items-center justify-center gap-3 shadow-xl"
             >
               <img src="https://www.google.com/favicon.ico" className="w-4 h-4" alt="" />
               Iniciar sesión con Google
@@ -2621,7 +2572,7 @@ export default function App() {
             <div className="h-px w-12 bg-slate-100"></div>
             <p className="text-[9px] text-slate-500 uppercase tracking-[0.3em] font-bold">Autenticación segura vía Firebase</p>
           </div>
-        </motion.div>
+        </div>
       </div>
     );
   }
@@ -2678,51 +2629,44 @@ export default function App() {
               )}
             </button>
             
-            <AnimatePresence>
-              {showDailyTaskMessage && (
-                <motion.div 
-                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                  className="absolute top-full right-0 mt-2 w-64 bg-white border border-slate-200 rounded-2xl shadow-2xl p-4 z-50"
-                >
-                  <h5 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Seleccionar Tarea</h5>
-                  <div className="grid grid-cols-1 gap-1">
-                    {['BASURA', 'TRAPO TALLER', 'TRAPO COMEDOR', 'ESCOBA TALLER', 'ESCOBA COMEDOR', 'MICROONDAS', 'ESCALERA'].map(task => (
-                      <button
-                        key={task}
-                        onClick={async () => {
-                          try {
-                            await addDoc(collection(db, 'dailyTasks'), {
-                              userId: user.uid,
-                              userName: user.displayName || 'Anónimo',
-                              date: format(new Date(), 'yyyy-MM-dd'),
-                              taskType: task,
-                              createdAt: serverTimestamp()
-                            });
-                            setShowDailyTaskMessage(false);
-                            const toast = document.createElement('div');
-                            toast.className = "fixed bottom-12 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-8 py-5 rounded-3xl text-sm font-black z-[100] shadow-2xl border border-white/20 text-center min-w-[300px]";
-                            toast.innerHTML = "¡Gracias por colaborar!<br/><span class='text-xs opacity-80 font-medium mt-1 block'>Recuerda mantener el orden y la limpieza de tu área de trabajo.</span>";
-                            document.body.appendChild(toast);
-                            setTimeout(() => {
-                              toast.style.opacity = '0';
-                              toast.style.transition = 'opacity 0.5s ease';
-                              setTimeout(() => toast.remove(), 500);
-                            }, 5000);
-                          } catch (e) {
-                            console.error(e);
-                          }
-                        }}
-                        className="text-left px-3 py-2 text-[10px] font-bold text-slate-700 hover:bg-slate-50 rounded-lg transition-colors uppercase tracking-tight"
-                      >
-                        {task}
-                      </button>
-                    ))}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+            {showDailyTaskMessage && (
+              <div className="absolute top-full right-0 mt-2 w-64 bg-white border border-slate-200 rounded-xl shadow-xl p-4 z-50">
+                <h5 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Seleccionar Tarea</h5>
+                <div className="grid grid-cols-1 gap-1">
+                  {['BASURA', 'TRAPO TALLER', 'TRAPO COMEDOR', 'ESCOBA TALLER', 'ESCOBA COMEDOR', 'MICROONDAS', 'ESCALERA'].map(task => (
+                    <button
+                      key={task}
+                      onClick={async () => {
+                        try {
+                          await addDoc(collection(db, 'dailyTasks'), {
+                            userId: user.uid,
+                            userName: user.displayName || 'Anónimo',
+                            date: format(new Date(), 'yyyy-MM-dd'),
+                            taskType: task,
+                            createdAt: serverTimestamp()
+                          });
+                          setShowDailyTaskMessage(false);
+                          const toast = document.createElement('div');
+                          toast.className = "fixed bottom-12 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-8 py-5 rounded-xl text-sm font-black z-[100] shadow-xl border border-white/20 text-center min-w-[300px]";
+                          toast.innerHTML = "¡Gracias por colaborar!<br/><span class='text-xs opacity-80 font-medium mt-1 block'>Recuerda mantener el orden y la limpieza de tu área de trabajo.</span>";
+                          document.body.appendChild(toast);
+                          setTimeout(() => {
+                            toast.style.opacity = '0';
+                            toast.style.transition = 'opacity 0.5s ease';
+                            setTimeout(() => toast.remove(), 500);
+                          }, 5000);
+                        } catch (e) {
+                          console.error(e);
+                        }
+                      }}
+                      className="text-left px-3 py-2 text-[10px] font-bold text-slate-700 hover:bg-slate-50 rounded-lg uppercase tracking-tight"
+                    >
+                      {task}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* User Activity Button */}
@@ -2908,50 +2852,48 @@ export default function App() {
       </main>
 
       {/* Modals */}
-      <AnimatePresence>
-        {activeChat && (
-          <CardDetailModal 
-            card={activeChat} 
-            user={user} 
-            userProfile={userProfile}
-            onClose={() => setActiveChat(null)}
-            onPausar={(comment) => handlePausar(activeChat, comment)}
-            onReanudar={(comment) => handleReanudar(activeChat, comment)}
-            onFinalizar={(isRepaired, comment) => handleFinalizar(activeChat, isRepaired, comment)}
-          />
-        )}
-        {showUserManagement && (
-          <UserManagementModal 
-            onClose={() => setShowUserManagement(false)} 
-            users={users}
-          />
-        )}
-        {showIncidentsManagement && (
-          <IncidentsManagementModal 
-            onClose={() => setShowIncidentsManagement(false)}
-            users={users}
-            user={user}
-          />
-        )}
-        {showAttendanceManagement && (
-          <AttendanceManagementModal 
-            onClose={() => setShowAttendanceManagement(false)}
-            users={users}
-          />
-        )}
-        {showUserActivity && (
-          <UserActivityModal 
-            onClose={() => setShowUserActivity(false)}
-            user={user}
-          />
-        )}
-        {showKPIs && (
-          <KPIModal 
-            onClose={() => setShowKPIs(false)}
-            users={users}
-          />
-        )}
-      </AnimatePresence>
+      {activeChat && (
+        <CardDetailModal 
+          card={activeChat} 
+          user={user} 
+          userProfile={userProfile}
+          onClose={() => setActiveChat(null)}
+          onPausar={(comment) => handlePausar(activeChat, comment)}
+          onReanudar={(comment) => handleReanudar(activeChat, comment)}
+          onFinalizar={(isRepaired, comment) => handleFinalizar(activeChat, isRepaired, comment)}
+        />
+      )}
+      {showUserManagement && (
+        <UserManagementModal 
+          onClose={() => setShowUserManagement(false)} 
+          users={users}
+        />
+      )}
+      {showIncidentsManagement && (
+        <IncidentsManagementModal 
+          onClose={() => setShowIncidentsManagement(false)}
+          users={users}
+          user={user}
+        />
+      )}
+      {showAttendanceManagement && (
+        <AttendanceManagementModal 
+          onClose={() => setShowAttendanceManagement(false)}
+          users={users}
+        />
+      )}
+      {showUserActivity && (
+        <UserActivityModal 
+          onClose={() => setShowUserActivity(false)}
+          user={user}
+        />
+      )}
+      {showKPIs && (
+        <KPIModal 
+          onClose={() => setShowKPIs(false)}
+          users={users}
+        />
+      )}
 
       {/* Error Boundary Placeholder */}
       <div id="error-boundary-portal" />

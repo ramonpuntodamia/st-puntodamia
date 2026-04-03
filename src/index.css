@@ -8,24 +8,21 @@
 
 @layer base {
   body {
-    @apply bg-slate-50 text-slate-950 antialiased;
-    background-image: 
-      radial-gradient(circle at 2px 2px, rgba(0,0,0,0.02) 1px, transparent 0);
-    background-size: 24px 24px;
+    @apply bg-slate-100 text-slate-950 antialiased;
   }
 }
 
 .glass-panel {
-  @apply bg-white/5 backdrop-blur-md border border-white/10;
+  @apply bg-white border border-slate-300;
 }
 
 .brand-gradient {
-  background: linear-gradient(135deg, #00aeef 0%, #0088cc 100%);
+  @apply bg-brand-blue;
 }
 
 .scrollbar-thin::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 4px;
+  height: 4px;
 }
 
 .scrollbar-thin::-webkit-scrollbar-track {
@@ -33,5 +30,5 @@
 }
 
 .scrollbar-thin::-webkit-scrollbar-thumb {
-  @apply bg-slate-200 rounded-full hover:bg-slate-300 transition-colors;
+  @apply bg-slate-300 rounded-full;
 }
