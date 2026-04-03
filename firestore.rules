@@ -71,17 +71,17 @@ service cloud.firestore {
     // Collection: incidents
     // Document ID: auto-generated
     // Fields:
-    //   - type: string (required, enum: ['garantia', 'recepcion', 'taller'])
-    //   - orderNumber: string (required)
-    //   - referenceOrderNumber: string (optional)
+    //   - type: string (required, enum: ['garantia', 'personal'])
+    //   - orderNumber: string (optional)
+    //   - primaryOrderNumber: string (optional)
+    //   - incidentUserId: string (optional)
+    //   - incidentUserName: string (optional)
+    //   - solvingUserId: string (optional)
+    //   - solvingUserName: string (optional)
+    //   - solutionComment: string (optional)
+    //   - status: string (required, enum: ['abierta', 'resuelta'])
     //   - reportedBy: string (required)
     //   - reportedByName: string (required)
-    //   - technicianId: string (optional)
-    //   - technicianName: string (optional)
-    //   - repairTechnicianId: string (optional)
-    //   - repairTechnicianName: string (optional)
-    //   - description: string (required)
-    //   - status: string (required, enum: ['abierta', 'en_revision', 'resuelta'])
     //   - createdAt: timestamp (required)
     //
     // ===============================================================
@@ -174,19 +174,20 @@ service cloud.firestore {
     }
 
     function isValidIncident(data) {
-      return hasRequiredFields(['type', 'orderNumber', 'reportedBy', 'reportedByName', 'status', 'createdAt', 'description']) &&
-             data.type in ['garantia', 'recepcion', 'taller'] &&
+      return hasRequiredFields(['type', 'status', 'reportedBy', 'reportedByName', 'createdAt']) &&
+             data.keys().hasOnly(['type', 'orderNumber', 'primaryOrderNumber', 'incidentUserId', 'incidentUserName', 'solvingUserId', 'solvingUserName', 'solutionComment', 'status', 'reportedBy', 'reportedByName', 'createdAt']) &&
+             data.type in ['garantia', 'personal'] &&
+             data.status in ['abierta', 'resuelta'] &&
              data.reportedBy is string &&
              data.reportedByName is string &&
-             data.orderNumber is string &&
-             data.status in ['abierta', 'en_revision', 'resuelta'] &&
              data.createdAt is timestamp &&
-             data.description is string && data.description.size() > 0 &&
-             (!('referenceOrderNumber' in data) || data.referenceOrderNumber == null || data.referenceOrderNumber is string) &&
-             (!('technicianId' in data) || data.technicianId == null || data.technicianId is string) &&
-             (!('technicianName' in data) || data.technicianName == null || data.technicianName is string) &&
-             (!('repairTechnicianId' in data) || data.repairTechnicianId == null || data.repairTechnicianId is string) &&
-             (!('repairTechnicianName' in data) || data.repairTechnicianName == null || data.repairTechnicianName is string);
+             (!('orderNumber' in data) || data.orderNumber == null || data.orderNumber is string) &&
+             (!('primaryOrderNumber' in data) || data.primaryOrderNumber == null || data.primaryOrderNumber is string) &&
+             (!('incidentUserId' in data) || data.incidentUserId == null || data.incidentUserId is string) &&
+             (!('incidentUserName' in data) || data.incidentUserName == null || data.incidentUserName is string) &&
+             (!('solvingUserId' in data) || data.solvingUserId == null || data.solvingUserId is string) &&
+             (!('solvingUserName' in data) || data.solvingUserName == null || data.solvingUserName is string) &&
+             (!('solutionComment' in data) || data.solutionComment == null || data.solutionComment is string);
     }
 
     // ===============================================================
@@ -257,7 +258,8 @@ service cloud.firestore {
     match /incidents/{incidentId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidIncident(request.resource.data);
-      allow update, delete: if isAdmin();
+      allow update: if isAdmin() && isValidIncident(request.resource.data);
+      allow delete: if isAdmin();
     }
 
     // Default deny

@@ -52,18 +52,18 @@ export interface Card {
 
 export interface Incident {
   id: string;
-  type: 'garantia' | 'recepcion' | 'taller';
-  orderNumber: string;
-  referenceOrderNumber?: string;
-  reportedBy: string;
-  reportedByName: string;
-  technicianId?: string;
-  technicianName?: string;
-  repairTechnicianId?: string;
-  repairTechnicianName?: string;
-  description: string;
-  status: 'abierta' | 'en_revision' | 'resuelta';
+  type: 'garantia' | 'personal';
+  orderNumber?: string; // Nro de orden actual (automático en garantía)
+  primaryOrderNumber?: string; // Garantía de Orden (nro de orden primaria)
+  incidentUserId?: string; // Usuario Incidente (quien ocasionó la incidencia)
+  incidentUserName?: string;
+  solvingUserId?: string; // Usuario que Solucionó
+  solvingUserName?: string;
+  solutionComment?: string; // Caja de comentario (registro de solución)
+  status: 'abierta' | 'resuelta';
   createdAt: Timestamp;
+  reportedBy: string; // Quien registra la incidencia
+  reportedByName: string;
 }
 
 export interface Attendance {

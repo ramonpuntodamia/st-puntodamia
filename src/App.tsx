@@ -261,6 +261,7 @@ const Card = ({
     }
 
     const checkCritical = () => {
+      if (!card.createdAt) return;
       const now = Date.now();
       const start = card.createdAt.toDate().getTime();
       const deadline = start + (24 * 60 * 60 * 1000);
@@ -630,6 +631,77 @@ const CardDetailModal = ({
                   </div>
                 </div>
               </section>
+
+              {/* Tag Management (Admin Only) */}
+              {isAdmin && (
+                <section className="space-y-4">
+                  <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Etiquetas de Estado</h4>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={async () => {
+                        const hasGarantia = card.tags?.includes('GARANTIA');
+                        const newTags = hasGarantia 
+                          ? card.tags.filter(t => t !== 'GARANTIA')
+                          : [...(card.tags || []), 'GARANTIA'];
+                        
+                        try {
+                          await updateDoc(doc(db, 'cards', card.id), { tags: newTags });
+                          
+                          // Auto-create incident if GARANTIA was just added
+                          if (!hasGarantia) {
+                            await addDoc(collection(db, 'incidents'), {
+                              type: 'garantia',
+                              orderNumber: card.title,
+                              primaryOrderNumber: '', 
+                              incidentUserId: card.assignedTechnicianId || null,
+                              incidentUserName: card.assignedTechnicianName || null,
+                              solvingUserId: null,
+                              solvingUserName: null,
+                              solutionComment: 'Incidencia generada automáticamente al marcar la orden como GARANTÍA desde el panel de control.',
+                              status: 'abierta',
+                              reportedBy: user.uid,
+                              reportedByName: user.displayName || 'Anónimo',
+                              createdAt: serverTimestamp()
+                            });
+                          }
+                        } catch (error) {
+                          handleFirestoreError(error, OperationType.WRITE, `cards/${card.id}`);
+                        }
+                      }}
+                      className={cn(
+                        "flex-1 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest border transition-all",
+                        card.tags?.includes('GARANTIA')
+                          ? "bg-orange-500 text-white border-orange-600 shadow-lg shadow-orange-500/20"
+                          : "bg-white text-slate-400 border-slate-200 hover:border-orange-300 hover:text-orange-500"
+                      )}
+                    >
+                      Garantía
+                    </button>
+                    <button 
+                      onClick={async () => {
+                        const hasUrgente = card.tags?.includes('URGENTE');
+                        const newTags = hasUrgente 
+                          ? card.tags.filter(t => t !== 'URGENTE')
+                          : [...(card.tags || []), 'URGENTE'];
+                        
+                        try {
+                          await updateDoc(doc(db, 'cards', card.id), { tags: newTags });
+                        } catch (error) {
+                          handleFirestoreError(error, OperationType.WRITE, `cards/${card.id}`);
+                        }
+                      }}
+                      className={cn(
+                        "flex-1 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest border transition-all",
+                        card.tags?.includes('URGENTE')
+                          ? "bg-red-500 text-white border-red-600 shadow-lg shadow-red-500/20"
+                          : "bg-white text-slate-400 border-slate-200 hover:border-red-300 hover:text-red-500"
+                      )}
+                    >
+                      Urgente
+                    </button>
+                  </div>
+                </section>
+              )}
 
               {/* Decision Log (Replaces generic history) */}
               <section className="space-y-4">
@@ -1178,8 +1250,7 @@ const KPIModal = ({ onClose, users }: KPIModalProps) => {
   // 2. Incident Distribution
   const incidentDistribution = [
     { name: 'Garantías', value: incidents.filter(i => i.type === 'garantia').length, color: '#ef4444' },
-    { name: 'Taller', value: incidents.filter(i => i.type === 'taller').length, color: '#3b82f6' },
-    { name: 'Recepción', value: incidents.filter(i => i.type === 'recepcion').length, color: '#f59e0b' }
+    { name: 'Personal', value: incidents.filter(i => i.type === 'personal').length, color: '#f59e0b' }
   ].filter(i => i.value > 0);
 
   // 3. Daily Task History (Last 15 days)
@@ -1211,7 +1282,7 @@ const KPIModal = ({ onClose, users }: KPIModalProps) => {
     );
     
     const userIncidents = incidents.filter(i => 
-      i.technicianId === auditUserId && 
+      i.incidentUserId === auditUserId && 
       i.createdAt?.toDate() >= start && 
       i.createdAt?.toDate() <= end
     );
@@ -1229,9 +1300,7 @@ const KPIModal = ({ onClose, users }: KPIModalProps) => {
     );
 
     // Calculate days without task
-    // (This is a bit complex, we'd need to know which days they actually worked)
-    // For now, let's list days where they had an order activity but no task
-    const activeDays = new Set(userOrders.map(o => format(o.createdAt.toDate(), 'yyyy-MM-dd')));
+    const activeDays = new Set(userOrders.filter(o => o.createdAt).map(o => format(o.createdAt.toDate(), 'yyyy-MM-dd')));
     const taskDays = new Set(userTasks.map(t => t.date));
     const missingTaskDays = Array.from(activeDays).filter(d => !taskDays.has(d)).sort();
 
@@ -1270,7 +1339,7 @@ const KPIModal = ({ onClose, users }: KPIModalProps) => {
         ['Órdenes Reparadas', repaired],
         ['Órdenes No Reparadas', notRepaired],
         ['Órdenes de Garantía Recibidas', warranties],
-        ['Incidencias Registradas', userIncidents.length],
+        ['Incidencias Registradas (Responsable)', userIncidents.length],
         ['Días sin Registro de Tarea Diaria', missingTaskDays.length]
       ],
       theme: 'striped',
@@ -1282,12 +1351,12 @@ const KPIModal = ({ onClose, users }: KPIModalProps) => {
     doc.text('DETALLE DE INCIDENCIAS', 14, finalY1);
     (doc as any).autoTable({
       startY: finalY1 + 5,
-      head: [['Fecha', 'Tipo', 'Orden', 'Descripción', 'Estado']],
+      head: [['Fecha', 'Tipo', 'Orden', 'Solución / Registro', 'Estado']],
       body: userIncidents.map(i => [
         formatTimestamp(i.createdAt, 'dd/MM/yy'),
-        i.type.toUpperCase(),
-        `#${i.orderNumber}`,
-        i.description,
+        i.type === 'garantia' ? 'GARANTÍA' : 'PERSONAL',
+        i.type === 'garantia' ? `#${i.orderNumber} (Ref: #${i.primaryOrderNumber})` : 'N/A',
+        i.solutionComment,
         i.status.toUpperCase()
       ]),
       theme: 'grid',
@@ -1563,13 +1632,13 @@ const IncidentsManagementModal = ({ onClose, users, user }: IncidentsManagementM
   const [loading, setLoading] = useState(true);
   
   // Form state
-  const [type, setType] = useState<'garantia' | 'recepcion' | 'taller'>('taller');
+  const [type, setType] = useState<'garantia' | 'personal'>('personal');
   const [orderNumber, setOrderNumber] = useState('');
-  const [referenceOrderNumber, setReferenceOrderNumber] = useState('');
-  const [technicianId, setTechnicianId] = useState('');
-  const [repairTechnicianId, setRepairTechnicianId] = useState('');
-  const [description, setDescription] = useState('');
-  const [status, setStatus] = useState<'abierta' | 'en_revision' | 'resuelta'>('abierta');
+  const [primaryOrderNumber, setPrimaryOrderNumber] = useState('');
+  const [incidentUserId, setIncidentUserId] = useState('');
+  const [solvingUserId, setSolvingUserId] = useState('');
+  const [solutionComment, setSolutionComment] = useState('');
+  const [status, setStatus] = useState<'abierta' | 'resuelta'>('abierta');
   const [editingId, setEditingId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1583,31 +1652,54 @@ const IncidentsManagementModal = ({ onClose, users, user }: IncidentsManagementM
     return () => unsubscribe();
   }, []);
 
+  // Auto-lookup technician for primary order
+  useEffect(() => {
+    if (type === 'garantia' && primaryOrderNumber.length >= 3) {
+      const lookupPrimaryOrder = async () => {
+        try {
+          const q = query(collection(db, 'cards'), where('title', '==', primaryOrderNumber), limit(1));
+          const snapshot = await getDocs(q);
+          if (!snapshot.empty) {
+            const cardData = snapshot.docs[0].data() as CardType;
+            if (cardData.assignedTechnicianId) {
+              setIncidentUserId(cardData.assignedTechnicianId);
+            }
+          }
+        } catch (error) {
+          console.error("Error looking up primary order:", error);
+        }
+      };
+      const timeoutId = setTimeout(lookupPrimaryOrder, 500);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [primaryOrderNumber, type]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const tech = users.find(u => u.uid === technicianId);
-    const repairTech = users.find(u => u.uid === repairTechnicianId);
+    const incidentUser = users.find(u => u.uid === incidentUserId);
+    const solvingUser = users.find(u => u.uid === solvingUserId);
     
     const incidentData = {
       type,
-      orderNumber,
-      referenceOrderNumber: referenceOrderNumber || null,
+      orderNumber: type === 'garantia' ? orderNumber : null,
+      primaryOrderNumber: type === 'garantia' ? primaryOrderNumber : null,
+      incidentUserId: incidentUserId || null,
+      incidentUserName: incidentUser?.displayName || null,
+      solvingUserId: solvingUserId || null,
+      solvingUserName: solvingUser?.displayName || null,
+      solutionComment,
+      status,
       reportedBy: user.uid,
       reportedByName: user.displayName || 'Admin',
-      technicianId: technicianId || null,
-      technicianName: tech?.displayName || null,
-      repairTechnicianId: repairTechnicianId || null,
-      repairTechnicianName: repairTech?.displayName || null,
-      description,
-      status,
       createdAt: serverTimestamp()
     };
 
     try {
       if (editingId) {
+        const original = incidents.find(i => i.id === editingId);
         await updateDoc(doc(db, 'incidents', editingId), {
           ...incidentData,
-          createdAt: incidents.find(i => i.id === editingId)?.createdAt // Keep original timestamp
+          createdAt: original?.createdAt // Keep original timestamp
         });
       } else {
         await addDoc(collection(db, 'incidents'), incidentData);
@@ -1622,22 +1714,22 @@ const IncidentsManagementModal = ({ onClose, users, user }: IncidentsManagementM
     setShowForm(false);
     setEditingId(null);
     setOrderNumber('');
-    setReferenceOrderNumber('');
-    setTechnicianId('');
-    setRepairTechnicianId('');
-    setDescription('');
+    setPrimaryOrderNumber('');
+    setIncidentUserId('');
+    setSolvingUserId('');
+    setSolutionComment('');
     setStatus('abierta');
-    setType('taller');
+    setType('personal');
   };
 
   const handleEdit = (incident: Incident) => {
     setEditingId(incident.id);
     setType(incident.type);
-    setOrderNumber(incident.orderNumber);
-    setReferenceOrderNumber(incident.referenceOrderNumber || '');
-    setTechnicianId(incident.technicianId || '');
-    setRepairTechnicianId(incident.repairTechnicianId || '');
-    setDescription(incident.description);
+    setOrderNumber(incident.orderNumber || '');
+    setPrimaryOrderNumber(incident.primaryOrderNumber || '');
+    setIncidentUserId(incident.incidentUserId || '');
+    setSolvingUserId(incident.solvingUserId || '');
+    setSolutionComment(incident.solutionComment || '');
     setStatus(incident.status);
     setShowForm(true);
   };
@@ -1648,14 +1740,14 @@ const IncidentsManagementModal = ({ onClose, users, user }: IncidentsManagementM
         className="bg-white w-full max-w-5xl h-[85vh] rounded-xl border border-slate-300 shadow-xl flex flex-col overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
-        <div className="p-6 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
+        <div className="p-6 border-b border-slate-200 flex items-center justify-between bg-slate-50">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-red-50 rounded-2xl flex items-center justify-center border border-red-100">
+            <div className="w-12 h-12 bg-red-50 rounded-xl flex items-center justify-center border border-red-100">
               <AlertTriangle className="w-6 h-6 text-red-500" />
             </div>
             <div>
-              <h3 className="font-black text-xl text-slate-950 tracking-tight">Gestión de Incidencias</h3>
-              <p className="text-xs text-slate-500 font-bold uppercase tracking-widest">Panel de Control Administrativo</p>
+              <h3 className="font-black text-xl text-slate-950 tracking-tight">Registro de Incidencias</h3>
+              <p className="text-xs text-slate-500 font-bold uppercase tracking-widest">Garantías y Desempeño del Personal</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -1663,9 +1755,9 @@ const IncidentsManagementModal = ({ onClose, users, user }: IncidentsManagementM
               onClick={() => setShowForm(!showForm)}
               className="px-4 py-2 bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-slate-800 transition-all flex items-center gap-2"
             >
-              {showForm ? 'Ver Listado' : 'Nueva Incidencia'}
+              {showForm ? 'Ver Listado' : 'Registrar Incidencia'}
             </button>
-            <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full text-slate-600 hover:text-slate-800 transition-colors">
+            <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full text-slate-600">
               <X className="w-6 h-6" />
             </button>
           </div>
@@ -1680,11 +1772,10 @@ const IncidentsManagementModal = ({ onClose, users, user }: IncidentsManagementM
                   <select 
                     value={type}
                     onChange={e => setType(e.target.value as any)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-2xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-[#00aeef]/50"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-[#00aeef]/50"
                   >
-                    <option value="recepcion">Incidencia en Recepción</option>
-                    <option value="taller">Incidencia en Taller</option>
-                    <option value="garantia">Incidencia por Garantía</option>
+                    <option value="personal">Incidencia del Personal</option>
+                    <option value="garantia">Garantía de una Orden</option>
                   </select>
                 </div>
 
@@ -1693,160 +1784,160 @@ const IncidentsManagementModal = ({ onClose, users, user }: IncidentsManagementM
                   <select 
                     value={status}
                     onChange={e => setStatus(e.target.value as any)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-2xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-[#00aeef]/50"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-[#00aeef]/50"
                   >
-                    <option value="abierta">Abierta</option>
-                    <option value="en_revision">En Revisión</option>
-                    <option value="resuelta">Resuelta</option>
+                    <option value="abierta">Abierta (Pendiente)</option>
+                    <option value="resuelta">Resuelta (Finalizada)</option>
                   </select>
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Nro de Orden (Actual)</label>
-                  <input 
-                    type="text"
-                    value={orderNumber}
-                    onChange={e => setOrderNumber(e.target.value)}
-                    placeholder="Ej: 12345"
-                    required
-                    className="w-full bg-slate-50 border border-slate-300 rounded-2xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-[#00aeef]/50"
-                  />
-                </div>
+                {type === 'garantia' && (
+                  <>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Nro de Orden (Garantía Actual)</label>
+                      <input 
+                        type="text"
+                        value={orderNumber}
+                        onChange={e => setOrderNumber(e.target.value)}
+                        placeholder="Ej: 5520"
+                        required={type === 'garantia'}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-[#00aeef]/50"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Garantía de Orden (Orden Primaria)</label>
+                      <input 
+                        type="text"
+                        value={primaryOrderNumber}
+                        onChange={e => setPrimaryOrderNumber(e.target.value)}
+                        placeholder="Nro de orden original"
+                        required={type === 'garantia'}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-[#00aeef]/50"
+                      />
+                    </div>
+                  </>
+                )}
 
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Referencia (Garantías)</label>
-                  <input 
-                    type="text"
-                    value={referenceOrderNumber}
-                    onChange={e => setReferenceOrderNumber(e.target.value)}
-                    placeholder="Nro de orden original"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-2xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-[#00aeef]/50"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Técnico Original (Referido)</label>
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Usuario Incidente (Responsable)</label>
                   <select 
-                    value={technicianId}
-                    onChange={e => setTechnicianId(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-2xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-[#00aeef]/50"
+                    value={incidentUserId}
+                    onChange={e => setIncidentUserId(e.target.value)}
+                    required
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-[#00aeef]/50"
                   >
-                    <option value="">Seleccionar técnico...</option>
-                    {users.filter(u => u.role === 'tecnico' || u.role === 'admin').map(u => (
-                      <option key={u.uid} value={u.uid}>{u.displayName}</option>
+                    <option value="">Seleccionar usuario...</option>
+                    {users.map(u => (
+                      <option key={u.uid} value={u.uid}>{u.displayName} ({u.role})</option>
                     ))}
                   </select>
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Técnico que Reparó (Solución)</label>
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Usuario que Solucionó</label>
                   <select 
-                    value={repairTechnicianId}
-                    onChange={e => setRepairTechnicianId(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-2xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-[#00aeef]/50"
+                    value={solvingUserId}
+                    onChange={e => setSolvingUserId(e.target.value)}
+                    required
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-[#00aeef]/50"
                   >
-                    <option value="">Seleccionar técnico...</option>
-                    {users.filter(u => u.role === 'tecnico' || u.role === 'admin').map(u => (
-                      <option key={u.uid} value={u.uid}>{u.displayName}</option>
+                    <option value="">Seleccionar usuario...</option>
+                    {users.map(u => (
+                      <option key={u.uid} value={u.uid}>{u.displayName} ({u.role})</option>
                     ))}
                   </select>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Comentario / Detalles</label>
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Caja de Comentario (Registro de Solución)</label>
                 <textarea 
-                  value={description}
-                  onChange={e => setDescription(e.target.value)}
-                  placeholder="Detalles sobre el suceso y cómo se resolvió..."
+                  value={solutionComment}
+                  onChange={e => setSolutionComment(e.target.value)}
+                  placeholder="Describe cómo se dio solución a la incidencia..."
                   required
-                  className="w-full h-32 bg-slate-50 border border-slate-300 rounded-2xl p-4 text-sm focus:outline-none focus:border-[#00aeef]/50"
+                  rows={4}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-[#00aeef]/50 resize-none"
                 />
               </div>
 
-              <div className="flex gap-3 pt-4">
+              <div className="pt-4">
                 <button 
                   type="submit"
-                  className="flex-1 py-4 bg-[#00aeef] text-white font-black uppercase tracking-widest rounded-2xl hover:bg-[#0088cc] transition-all shadow-lg shadow-[#00aeef]/20"
+                  className="w-full py-4 bg-[#00aeef] text-white font-black rounded-xl hover:bg-[#0088cc] transition-all uppercase tracking-widest shadow-lg shadow-[#00aeef]/20"
                 >
-                  {editingId ? 'Actualizar Registro' : 'Guardar Incidencia'}
-                </button>
-                <button 
-                  type="button"
-                  onClick={resetForm}
-                  className="px-8 py-4 bg-slate-100 text-slate-600 font-black uppercase tracking-widest rounded-2xl hover:bg-slate-200 transition-all"
-                >
-                  Cancelar
+                  {editingId ? 'Actualizar Registro' : 'Registrar Incidencia'}
                 </button>
               </div>
             </form>
           ) : (
             <div className="flex-1 overflow-y-auto p-6 scrollbar-none">
               {loading ? (
-                <div className="h-full flex items-center justify-center">
+                <div className="flex flex-col items-center justify-center h-full space-y-4">
                   <RefreshCw className="w-8 h-8 text-[#00aeef] animate-spin" />
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Cargando registros...</p>
                 </div>
               ) : incidents.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-slate-400 space-y-4">
-                  <AlertCircle className="w-12 h-12 opacity-20" />
-                  <p className="font-bold uppercase tracking-widest text-xs">No hay incidencias registradas</p>
+                <div className="flex flex-col items-center justify-center h-full text-center space-y-4">
+                  <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center border border-slate-100">
+                    <AlertTriangle className="w-8 h-8 text-slate-200" />
+                  </div>
+                  <p className="text-sm font-bold text-slate-400">No hay incidencias registradas</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 gap-4">
-                  {incidents.map((incident) => (
-                    <div 
-                      key={incident.id} 
-                      className="bg-white border border-slate-200 rounded-2xl p-5 hover:border-[#00aeef]/30 transition-all group relative"
-                    >
+                  {incidents.map(incident => (
+                    <div key={incident.id} className="bg-white border border-slate-200 rounded-xl p-5 hover:border-[#00aeef]/30 transition-all group relative">
                       <div className="flex justify-between items-start mb-4">
                         <div className="flex items-center gap-3">
-                          <span className={cn(
-                            "px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border",
-                            incident.type === 'garantia' ? "bg-red-50 border-red-100 text-red-600" :
-                            incident.type === 'recepcion' ? "bg-orange-50 border-orange-100 text-orange-600" :
-                            "bg-blue-50 border-blue-100 text-blue-600"
+                          <div className={cn(
+                            "px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border",
+                            incident.type === 'garantia' ? "bg-red-50 border-red-100 text-red-600" : "bg-amber-50 border-amber-100 text-amber-600"
                           )}>
-                            {incident.type}
-                          </span>
-                          <span className={cn(
-                            "px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border",
-                            incident.status === 'resuelta' ? "bg-green-50 border-green-100 text-green-600" :
-                            incident.status === 'en_revision' ? "bg-yellow-50 border-yellow-100 text-yellow-600" :
-                            "bg-slate-50 border-slate-100 text-slate-600"
+                            {incident.type === 'garantia' ? 'Garantía de Orden' : 'Incidencia Personal'}
+                          </div>
+                          <div className={cn(
+                            "px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest border",
+                            incident.status === 'resuelta' ? "bg-green-50 border-green-100 text-green-600" : "bg-slate-50 border-slate-100 text-slate-500"
                           )}>
                             {incident.status}
-                          </span>
+                          </div>
                         </div>
-                        <span className="text-[10px] font-mono text-slate-400">{formatTimestamp(incident.createdAt, 'dd/MM/yy HH:mm')}</span>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-4">
-                        <div>
-                          <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1">Orden / Ref</p>
-                          <p className="text-sm font-black text-slate-900">#{incident.orderNumber} {incident.referenceOrderNumber && <span className="text-slate-400 text-xs ml-1">/ Ref: #{incident.referenceOrderNumber}</span>}</p>
-                        </div>
-                        <div>
-                          <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1">Técnico Original</p>
-                          <p className="text-sm font-black text-slate-900">{incident.technicianName || '-'}</p>
-                        </div>
-                        <div>
-                          <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mb-1">Reparado por</p>
-                          <p className="text-sm font-black text-slate-900">{incident.repairTechnicianName || '-'}</p>
+                        <div className="flex items-center gap-2">
+                          <button 
+                            onClick={() => handleEdit(incident)}
+                            className="p-2 hover:bg-slate-50 rounded-lg text-slate-400 hover:text-[#00aeef] transition-colors"
+                          >
+                            <Settings className="w-4 h-4" />
+                          </button>
                         </div>
                       </div>
 
-                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 mb-4">
-                        <p className="text-xs text-slate-700 leading-relaxed italic">"{incident.description}"</p>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="space-y-1">
+                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Trazabilidad</p>
+                          <p className="text-xs font-bold text-slate-900">
+                            {incident.type === 'garantia' ? (
+                              <>Orden: {incident.orderNumber} <span className="text-slate-300 mx-1">→</span> Ref: {incident.primaryOrderNumber}</>
+                            ) : 'N/A'}
+                          </p>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Responsable / Solucionó</p>
+                          <p className="text-xs font-bold text-slate-900">
+                            {incident.incidentUserName} <span className="text-slate-300 mx-1">/</span> {incident.solvingUserName}
+                          </p>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Fecha Registro</p>
+                          <p className="text-xs font-bold text-slate-900">{formatTimestamp(incident.createdAt, 'dd/MM/yyyy HH:mm')}</p>
+                        </div>
                       </div>
 
-                      <div className="flex items-center justify-between">
-                        <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Registrado por: {incident.reportedByName}</p>
-                        <button 
-                          onClick={() => handleEdit(incident)}
-                          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-[9px] font-black uppercase tracking-widest rounded-lg transition-all"
-                        >
-                          Editar / Completar
-                        </button>
+                      <div className="mt-4 pt-4 border-t border-slate-50">
+                        <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-2">Registro de Solución</p>
+                        <p className="text-xs text-slate-700 leading-relaxed italic">"{incident.solutionComment}"</p>
                       </div>
                     </div>
                   ))}
@@ -2388,11 +2479,16 @@ export default function App() {
         await addDoc(collection(db, 'incidents'), {
           type: 'garantia',
           orderNumber: newCardTitle.trim(),
+          primaryOrderNumber: '', // To be filled by admin later
+          incidentUserId: null,
+          incidentUserName: null,
+          solvingUserId: null,
+          solvingUserName: null,
+          solutionComment: 'Incidencia generada automáticamente por sistema al marcar Garantía en el ingreso.',
+          status: 'abierta',
           reportedBy: user.uid,
           reportedByName: user.displayName || 'Anónimo',
-          status: 'abierta',
-          createdAt: serverTimestamp(),
-          description: 'Orden ingresada como GARANTÍA. Pendiente de revisión por administrador.'
+          createdAt: serverTimestamp()
         });
       }
 

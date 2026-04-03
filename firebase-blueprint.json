@@ -97,23 +97,23 @@
     },
     "Incident": {
       "title": "Incident",
-      "description": "Reported incidents related to orders or processes",
+      "description": "Reported incidents related to orders or staff performance",
       "type": "object",
       "properties": {
-        "type": { "type": "string", "enum": ["garantia", "recepcion", "taller"] },
-        "orderNumber": { "type": "string" },
-        "referenceOrderNumber": { "type": "string" },
-        "reportedBy": { "type": "string" },
+        "type": { "type": "string", "enum": ["garantia", "personal"] },
+        "orderNumber": { "type": "string", "description": "Current order number" },
+        "primaryOrderNumber": { "type": "string", "description": "Original order number for warranties" },
+        "incidentUserId": { "type": "string", "description": "User who caused the incident" },
+        "incidentUserName": { "type": "string" },
+        "solvingUserId": { "type": "string", "description": "User who solved the incident" },
+        "solvingUserName": { "type": "string" },
+        "solutionComment": { "type": "string", "description": "Description of the solution or incident details" },
+        "status": { "type": "string", "enum": ["abierta", "resuelta"] },
+        "reportedBy": { "type": "string", "description": "UID of the user reporting the incident" },
         "reportedByName": { "type": "string" },
-        "technicianId": { "type": "string" },
-        "technicianName": { "type": "string" },
-        "repairTechnicianId": { "type": "string" },
-        "repairTechnicianName": { "type": "string" },
-        "description": { "type": "string" },
-        "status": { "type": "string", "enum": ["abierta", "en_revision", "resuelta"] },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["type", "orderNumber", "reportedBy", "reportedByName", "description", "status", "createdAt"]
+      "required": ["type", "status", "reportedBy", "reportedByName", "createdAt"]
     },
     "Message": {
       "title": "Message",
