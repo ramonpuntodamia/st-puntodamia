@@ -58,7 +58,8 @@ import {
   BarChart3,
   Activity,
   Check,
-  Download
+  Download,
+  Repeat
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from './lib/utils';
@@ -225,6 +226,7 @@ const Card = ({
   technicians
 }: CardProps) => {
   const [hasUnread, setHasUnread] = useState(false);
+  const [showAssign, setShowAssign] = useState(false);
 
   useEffect(() => {
     if (!card.lastMessageAt) return;
@@ -343,9 +345,42 @@ const Card = ({
 
         {/* Technician Info (Not in Recepcion) */}
         {!isRecepcion && card.assignedTechnicianName && (
-          <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 rounded-lg border border-slate-100">
-            <UserCog className="w-2.5 h-2.5 text-[#00aeef]/50" />
-            <span className="text-[9px] text-slate-600 font-bold truncate">{card.assignedTechnicianName}</span>
+          <div className="group relative">
+            {!showAssign ? (
+              <div className="flex items-center justify-between gap-1.5 px-2 py-1 bg-slate-50 rounded-lg border border-slate-100">
+                <div className="flex items-center gap-1.5 truncate">
+                  <UserCog className="w-2.5 h-2.5 text-[#00aeef]/50" />
+                  <span className="text-[9px] text-slate-600 font-bold truncate">{card.assignedTechnicianName}</span>
+                </div>
+                {(userProfile?.role === 'admin' || userProfile?.role === 'tecnico') && (
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setShowAssign(true); }}
+                    className="p-0.5 hover:bg-slate-200 rounded transition-colors"
+                    title="Cambiar Técnico"
+                  >
+                    <Repeat className="w-2.5 h-2.5 text-slate-400" />
+                  </button>
+                )}
+              </div>
+            ) : (
+              <select 
+                autoFocus
+                className="w-full py-1 bg-white border border-[#00aeef]/30 rounded-lg text-[9px] font-bold text-slate-700 focus:outline-none"
+                onChange={(e) => {
+                  const tech = technicians.find(t => t.uid === e.target.value);
+                  if (tech) onAsignar(tech.uid, tech.displayName || 'Técnico');
+                  setShowAssign(false);
+                }}
+                onBlur={() => setShowAssign(false)}
+                defaultValue={card.assignedTechnicianId || ""}
+                onClick={e => e.stopPropagation()}
+              >
+                <option value="" disabled>Cambiar Técnico</option>
+                {technicians.map(t => (
+                  <option key={t.uid} value={t.uid}>{t.displayName}</option>
+                ))}
+              </select>
+            )}
           </div>
         )}
 
@@ -359,7 +394,7 @@ const Card = ({
           </button>
         )}
 
-        {isTaller && (userProfile?.role === 'admin') && (
+        {isTaller && (userProfile?.role === 'admin' || userProfile?.role === 'tecnico') && (
           <select 
             className="w-full py-1.5 bg-white border border-slate-200 rounded-lg text-[9px] font-bold text-slate-700 focus:outline-none focus:border-[#00aeef]/50 cursor-pointer"
             onChange={(e) => {
@@ -2521,22 +2556,28 @@ export default function App() {
   };
 
   const handleAsignarTecnico = async (card: CardType, techId: string, techName: string) => {
-    const reparacionCol = columns.find(c => c.id === 'reparacion');
-    if (!reparacionCol) return;
-
     try {
-      await updateDoc(doc(db, 'cards', card.id), {
-        columnId: reparacionCol.id,
+      const isInitialAssignment = card.currentStep === 'taller';
+      const reparacionCol = columns.find(c => c.id === 'reparacion');
+      
+      const updateData: any = {
         assignedTechnicianId: techId,
         assignedTechnicianName: techName,
-        currentStep: 'reparacion',
         history: [...(card.history || []), {
-          step: 'reparacion',
+          step: card.currentStep,
           timestamp: new Date(),
           userId: user?.uid,
-          userName: user?.displayName || 'Anónimo'
+          userName: user?.displayName || 'Anónimo',
+          comment: `Técnico asignado/cambiado: ${techName}`
         }]
-      });
+      };
+
+      if (isInitialAssignment && reparacionCol) {
+        updateData.columnId = reparacionCol.id;
+        updateData.currentStep = 'reparacion';
+      }
+
+      await updateDoc(doc(db, 'cards', card.id), updateData);
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `cards/${card.id}`);
     }
