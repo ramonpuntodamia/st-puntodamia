@@ -191,15 +191,15 @@ const Countdown = ({ createdAt, finalizedAt }: { createdAt: Timestamp; finalized
 
   return (
     <div className={cn(
-      "flex items-center gap-1.5 px-2 py-1 rounded-lg border font-mono text-[10px] font-black tracking-tighter transition-colors",
+      "flex items-center gap-1.5 px-2 py-0.5 rounded-lg border font-mono text-[9px] font-black tracking-tighter transition-colors",
       finalizedAt ? "bg-slate-100 border-slate-200 text-slate-400" :
       status === 'critical' ? "bg-red-600 border-red-700 text-white" :
       status === 'urgent' ? "bg-amber-50 border-amber-200 text-amber-600" : 
       "bg-blue-50 border-blue-200 text-[#00aeef]"
     )}>
-      {status === 'critical' ? <AlertTriangle className="w-3 h-3 animate-pulse" /> : <RefreshCw className="w-3 h-3" />}
+      {status === 'critical' ? <AlertTriangle className="w-2.5 h-2.5 animate-pulse" /> : <RefreshCw className="w-2.5 h-2.5" />}
       <span>{timeLeft}</span>
-      {status === 'critical' && <span className="ml-1 animate-pulse">!</span>}
+      {status === 'critical' && <span className="ml-0.5 animate-pulse">!</span>}
     </div>
   );
 };
@@ -278,74 +278,74 @@ const Card = ({
   return (
     <div 
       className={cn(
-        "bg-white p-4 rounded-xl border transition-all cursor-pointer relative overflow-hidden",
+        "bg-white p-3 rounded-xl border transition-all cursor-pointer relative overflow-hidden",
         isCritical ? "border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.15)] ring-1 ring-red-500" : "border-slate-300 shadow-sm hover:border-[#00aeef]/50",
         isFinalizada && "opacity-75 grayscale-[0.5]"
       )}
       onClick={onOpenDetail}
     >
-      {/* Tags */}
-      <div className="flex flex-wrap gap-1 mb-3">
-        {card.tags?.map(tag => (
-          <span 
-            key={tag} 
-            className={cn(
-              "px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-widest border",
-              tag === 'URGENTE' ? "bg-red-50 border-red-200 text-red-600" : 
-              tag === 'GARANTIA' ? "bg-orange-50 border-orange-200 text-orange-600" :
-              "bg-slate-50 border-slate-200 text-slate-600"
-            )}
-          >
-            {tag}
-          </span>
-        ))}
-        {isFinalizada && (
-          <span className={cn(
-            "px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-widest border",
-            card.isRepaired ? "bg-green-50 border-green-200 text-green-600" : "bg-red-50 border-red-200 text-red-600"
-          )}>
-            {card.isRepaired ? 'REPARADO' : 'NO REPARADO'}
-          </span>
-        )}
-      </div>
-
-      {/* Title & Chat Notification */}
-      <div className="flex justify-between items-start mb-4">
-        <div>
-          <h4 className="text-sm font-black text-slate-950 tracking-tight leading-tight">
-            {card.title}
-          </h4>
-          <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mt-1">
-            {isFinalizada ? `Cerrada: ${formatTimestamp(card.finalizedAt, 'dd/MM/yy')}` : `Ingreso: ${formatTimestamp(card.createdAt, 'dd/MM/yy')}`}
-          </p>
-        </div>
+      {/* Row 1: Title & Chat */}
+      <div className="flex justify-between items-start mb-1">
+        <h4 className="text-sm font-black text-slate-950 tracking-tight leading-tight truncate pr-2">
+          {card.title}
+        </h4>
         {(hasUnread || isTaller || card.currentStep === 'reparacion' || card.currentStep === 'espera' || isFinalizada) && (
-          <div className="relative">
-            <MessageSquare className={cn("w-4 h-4", hasUnread ? "text-[#00aeef]" : "text-slate-300")} />
+          <div className="relative flex-shrink-0">
+            <MessageSquare className={cn("w-3.5 h-3.5", hasUnread ? "text-[#00aeef]" : "text-slate-300")} />
             {hasUnread && (
-              <span className="absolute -top-1 -right-1 flex h-2 w-2 rounded-full bg-[#00aeef]" />
+              <span className="absolute -top-0.5 -right-0.5 flex h-1.5 w-1.5 rounded-full bg-[#00aeef]" />
             )}
           </div>
         )}
       </div>
+
+      {/* Row 2: Date & Tags */}
+      <div className="flex justify-between items-center mb-3">
+        <p className="text-[8px] text-slate-500 font-bold uppercase tracking-widest">
+          {isFinalizada ? formatTimestamp(card.finalizedAt, 'dd/MM/yy') : formatTimestamp(card.createdAt, 'dd/MM/yy')}
+        </p>
+        <div className="flex flex-wrap gap-1 justify-end">
+          {card.tags?.map(tag => (
+            <span 
+              key={tag} 
+              className={cn(
+                "px-1.5 py-0.5 rounded text-[7px] font-black uppercase tracking-widest border",
+                tag === 'URGENTE' ? "bg-red-50 border-red-100 text-red-600" : 
+                tag === 'GARANTIA' ? "bg-orange-50 border-orange-100 text-orange-600" :
+                "bg-slate-50 border-slate-100 text-slate-600"
+              )}
+            >
+              {tag}
+            </span>
+          ))}
+          {isFinalizada && (
+            <span className={cn(
+              "px-1.5 py-0.5 rounded text-[7px] font-black uppercase tracking-widest border",
+              card.isRepaired ? "bg-green-50 border-green-100 text-green-600" : "bg-red-50 border-red-100 text-red-600"
+            )}>
+              {card.isRepaired ? 'OK' : 'NO'}
+            </span>
+          )}
+        </div>
+      </div>
       
       {/* State Specific Info */}
-      <div className="space-y-3">
+      <div className="space-y-2">
         {!isFinalizada && (
           <Countdown createdAt={card.createdAt} finalizedAt={card.finalizedAt} />
         )}
 
         {isFinalizada && card.closingComment && (
-          <p className="text-[10px] text-slate-600 italic line-clamp-2 bg-slate-50 p-2 rounded-lg border border-slate-100">
+          <p className="text-[9px] text-slate-500 italic truncate bg-slate-50 px-2 py-1 rounded-lg border border-slate-100">
             "{card.closingComment}"
           </p>
         )}
 
         {/* Technician Info (Not in Recepcion) */}
         {!isRecepcion && card.assignedTechnicianName && (
-          <div className="flex items-center gap-2 px-2 py-1.5 bg-slate-50 rounded-xl border border-slate-200">
-            <UserCog className="w-3 h-3 text-[#00aeef]/50" />
-            <span className="text-[10px] text-slate-700 font-bold truncate">{card.assignedTechnicianName}</span>
+          <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 rounded-lg border border-slate-100">
+            <UserCog className="w-2.5 h-2.5 text-[#00aeef]/50" />
+            <span className="text-[9px] text-slate-600 font-bold truncate">{card.assignedTechnicianName}</span>
           </div>
         )}
 
@@ -353,7 +353,7 @@ const Card = ({
         {isRecepcion && (userProfile?.role === 'recepcion' || userProfile?.role === 'admin') && (
           <button 
             onClick={onRecibir}
-            className="w-full py-2 bg-[#00aeef] hover:bg-[#0088cc] text-white text-[10px] font-black uppercase tracking-[0.2em] rounded-xl"
+            className="w-full py-1.5 bg-[#00aeef] hover:bg-[#0088cc] text-white text-[9px] font-black uppercase tracking-widest rounded-lg transition-colors"
           >
             Recibir
           </button>
@@ -361,7 +361,7 @@ const Card = ({
 
         {isTaller && (userProfile?.role === 'admin') && (
           <select 
-            className="w-full py-2 bg-white border border-slate-300 rounded-xl text-[10px] font-bold text-slate-800 focus:outline-none focus:border-[#00aeef]/50 cursor-pointer"
+            className="w-full py-1.5 bg-white border border-slate-200 rounded-lg text-[9px] font-bold text-slate-700 focus:outline-none focus:border-[#00aeef]/50 cursor-pointer"
             onChange={(e) => {
               const tech = technicians.find(t => t.uid === e.target.value);
               if (tech) onAsignar(tech.uid, tech.displayName || 'Técnico');
@@ -403,18 +403,18 @@ const Column = ({
   technicians
 }: ColumnProps) => {
   return (
-    <div className="flex flex-col flex-1 min-w-[220px] max-w-[280px] h-full bg-slate-200/50 rounded-xl border border-slate-300 overflow-hidden">
-      <div className="p-5 flex items-center justify-between bg-white/80 border-b border-slate-300">
-        <div className="flex items-center gap-3">
-          <div className="w-1.5 h-4 bg-[#00aeef] rounded-full"></div>
-          <h3 className="text-[10px] font-black text-slate-900 uppercase tracking-[0.3em]">{column.name}</h3>
-          <span className="px-2 py-0.5 rounded-full bg-slate-100 border border-slate-300 text-[10px] text-slate-700 font-bold">
+    <div className="flex flex-col flex-1 min-w-[200px] max-w-[260px] h-full bg-slate-200/50 rounded-xl border border-slate-300 overflow-hidden">
+      <div className="p-3.5 flex items-center justify-between bg-white/80 border-b border-slate-300">
+        <div className="flex items-center gap-2.5">
+          <div className="w-1 h-3.5 bg-[#00aeef] rounded-full"></div>
+          <h3 className="text-[9px] font-black text-slate-900 uppercase tracking-[0.2em]">{column.name}</h3>
+          <span className="px-1.5 py-0.5 rounded-full bg-slate-100 border border-slate-300 text-[9px] text-slate-700 font-bold">
             {cards.length}
           </span>
         </div>
       </div>
       
-      <div className="flex-1 overflow-y-auto p-5 space-y-4 scrollbar-none">
+      <div className="flex-1 overflow-y-auto p-3 space-y-2.5 scrollbar-none">
         {cards.map(card => (
           <Card 
             key={card.id} 
