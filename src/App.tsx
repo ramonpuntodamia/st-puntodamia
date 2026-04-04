@@ -59,7 +59,8 @@ import {
   Activity,
   Check,
   Download,
-  Repeat
+  Repeat,
+  FileText
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from './lib/utils';
@@ -2240,6 +2241,43 @@ const createDefaultColumns = async () => {
   }
 };
 
+const MANUAL_CONTENT = `
+1. Introducción
+Esta plataforma centraliza la comunicación, mide los tiempos de respuesta (SLA) y asegura que cada orden de servicio sea atendida con calidad.
+
+2. Roles y Permisos
+* Administrador: Control total, gestión de usuarios, auditorías y supervisión global.
+* Recepción: Creación de órdenes y recepción física de equipos.
+* Técnico: Reparaciones, comunicación por chat, pausas y finalización.
+
+3. El Tablero de Control (Workflow)
+1. Recepción: Órdenes recién creadas. Clic en "RECIBIR" para avanzar.
+2. Taller (Cola): Órdenes esperando técnico. El Admin o Técnico debe "Asignar".
+3. Reparación: Órdenes con técnico asignado en proceso activo.
+4. Espera (Pausado): Órdenes detenidas por repuestos o aprobación. Requiere comentario.
+5. Finalizada: Órdenes concluidas. Se indica si fue "Reparada" o "No Reparada".
+
+4. Funciones Detalladas
+⏱️ Contador (SLA): Meta de 24 horas. Azul (>4h), Ámbar (<4h), Rojo (<2h).
+🏷️ Etiquetas: URGENTE (Prioridad), GARANTÍA (Seguimiento especial).
+💬 Chat: Icono azul con punto = mensajes nuevos. Registro de toda comunicación.
+🔄 Re-asignación: Clic en icono de flechas junto al técnico para cambiar responsable.
+
+5. Procesos Clave
+A. Ingreso: Botón "+" -> Título -> Etiquetas -> Recepción.
+B. Pausar: Detalle -> "Pausar" -> Motivo.
+C. Finalizar: Detalle -> "Finalizar" -> Estado -> Comentario.
+
+6. Herramientas Administrativas
+📊 Auditorías: Rendimiento individual y reportes PDF en panel de KPIs.
+📅 Asistencia y Tareas: Registro de ingreso y objetivos diarios del personal.
+
+7. Buenas Prácticas
+1. Chat Actualizado: Registrar toda novedad técnica o del cliente.
+2. Respetar el Contador: Evitar que las tarjetas lleguen a color rojo.
+3. Cierre Preciso: Comentarios claros para base de garantía.
+`;
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -2663,6 +2701,21 @@ export default function App() {
 
   const handleLogout = () => signOut(auth);
 
+  const handleDownloadManual = () => {
+    const doc = new jsPDF();
+    doc.setFontSize(18);
+    doc.setTextColor(0, 174, 239); // #00aeef
+    doc.text('Manual Operativo: Gestión de Taller', 20, 20);
+    
+    doc.setFontSize(10);
+    doc.setTextColor(50, 50, 50);
+    
+    const lines = doc.splitTextToSize(MANUAL_CONTENT, 170);
+    doc.text(lines, 20, 35);
+    
+    doc.save('Manual_Operativo_Taller.pdf');
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#0a0b0d] flex items-center justify-center">
@@ -2861,6 +2914,14 @@ export default function App() {
               </button>
             </>
           )}
+
+          <button 
+            onClick={handleDownloadManual}
+            className="p-2 hover:bg-slate-100 rounded-xl text-slate-600 transition-colors relative group"
+            title="Manual Operativo"
+          >
+            <FileText className="w-5 h-5" />
+          </button>
 
           <button 
             onClick={handleLogout}
