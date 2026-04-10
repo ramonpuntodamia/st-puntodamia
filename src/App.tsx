@@ -2823,37 +2823,51 @@ export default function App() {
               <div className="absolute top-full right-0 mt-2 w-64 bg-white border border-slate-200 rounded-xl shadow-xl p-4 z-50">
                 <h5 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Seleccionar Tarea</h5>
                 <div className="grid grid-cols-1 gap-1">
-                  {['BASURA', 'TRAPO TALLER', 'TRAPO COMEDOR', 'ESCOBA TALLER', 'ESCOBA COMEDOR', 'MICROONDAS', 'ESCALERA'].map(task => (
-                    <button
-                      key={task}
-                      onClick={async () => {
-                        try {
-                          await addDoc(collection(db, 'dailyTasks'), {
-                            userId: user.uid,
-                            userName: user.displayName || 'Anónimo',
-                            date: format(new Date(), 'yyyy-MM-dd'),
-                            taskType: task,
-                            createdAt: serverTimestamp()
-                          });
-                          setShowDailyTaskMessage(false);
-                          const toast = document.createElement('div');
-                          toast.className = "fixed bottom-12 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-8 py-5 rounded-xl text-sm font-black z-[100] shadow-xl border border-white/20 text-center min-w-[300px]";
-                          toast.innerHTML = "¡Gracias por colaborar!<br/><span class='text-xs opacity-80 font-medium mt-1 block'>Recuerda mantener el orden y la limpieza de tu área de trabajo.</span>";
-                          document.body.appendChild(toast);
-                          setTimeout(() => {
-                            toast.style.opacity = '0';
-                            toast.style.transition = 'opacity 0.5s ease';
-                            setTimeout(() => toast.remove(), 500);
-                          }, 5000);
-                        } catch (e) {
-                          console.error(e);
-                        }
-                      }}
-                      className="text-left px-3 py-2 text-[10px] font-bold text-slate-700 hover:bg-slate-50 rounded-lg uppercase tracking-tight"
-                    >
-                      {task}
-                    </button>
-                  ))}
+                  {(() => {
+                    const techTasks = ['BASURA', 'TRAPO COMEDOR', 'TRAPO TALLER', 'ESCOBA COMEDOR', 'ESCOBA TALLER', 'DEPOSITO', 'ESCALERA', 'MICROONDAS', 'BAÑO'];
+                    const recepTasks = ['BASURA', 'TRAPO SALON', 'ESCOBA SALON', 'DESAYUNADOR', 'MUEBLES', 'BAÑO'];
+                    
+                    let tasks = [];
+                    if (userProfile?.role === 'admin') {
+                      tasks = Array.from(new Set([...techTasks, ...recepTasks]));
+                    } else if (userProfile?.role === 'recepcion') {
+                      tasks = recepTasks;
+                    } else {
+                      tasks = techTasks;
+                    }
+
+                    return tasks.map(task => (
+                      <button
+                        key={task}
+                        onClick={async () => {
+                          try {
+                            await addDoc(collection(db, 'dailyTasks'), {
+                              userId: user.uid,
+                              userName: user.displayName || 'Anónimo',
+                              date: format(new Date(), 'yyyy-MM-dd'),
+                              taskType: task,
+                              createdAt: serverTimestamp()
+                            });
+                            setShowDailyTaskMessage(false);
+                            const toast = document.createElement('div');
+                            toast.className = "fixed bottom-12 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-8 py-5 rounded-xl text-sm font-black z-[100] shadow-xl border border-white/20 text-center min-w-[300px]";
+                            toast.innerHTML = "¡Gracias por colaborar!<br/><span class='text-xs opacity-80 font-medium mt-1 block'>Recuerda mantener el orden y la limpieza de tu área de trabajo.</span>";
+                            document.body.appendChild(toast);
+                            setTimeout(() => {
+                              toast.style.opacity = '0';
+                              toast.style.transition = 'opacity 0.5s ease';
+                              setTimeout(() => toast.remove(), 500);
+                            }, 5000);
+                          } catch (e) {
+                            console.error(e);
+                          }
+                        }}
+                        className="text-left px-3 py-2 text-[10px] font-bold text-slate-700 hover:bg-slate-50 rounded-lg uppercase tracking-tight"
+                      >
+                        {task}
+                      </button>
+                    ));
+                  })()}
                 </div>
               </div>
             )}
