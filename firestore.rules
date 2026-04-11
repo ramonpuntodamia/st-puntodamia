@@ -162,7 +162,11 @@ service cloud.firestore {
              data.userId == request.auth.uid &&
              data.userName is string &&
              data.date.matches("^\\d{4}-\\d{2}-\\d{2}$") &&
-             data.taskType in ['BASURA', 'TRAPO TALLER', 'TRAPO COMEDOR', 'ESCOBA TALLER', 'ESCOBA COMEDOR', 'MICROONDAS', 'ESCALERA'] &&
+             data.taskType in [
+               'BASURA', 'TRAPO TALLER', 'TRAPO COMEDOR', 'ESCOBA TALLER', 'ESCOBA COMEDOR', 
+               'MICROONDAS', 'ESCALERA', 'DEPOSITO', 'BAÑO', 'TRAPO SALON', 'ESCOBA SALON', 
+               'DESAYUNADOR', 'MUEBLES'
+             ] &&
              data.createdAt is timestamp;
     }
 

@@ -115,6 +115,26 @@
       },
       "required": ["type", "status", "reportedBy", "reportedByName", "createdAt"]
     },
+    "DailyTask": {
+      "title": "DailyTask",
+      "description": "Daily cleaning and organization tasks",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "date": { "type": "string", "description": "YYYY-MM-DD" },
+        "taskType": { 
+          "type": "string", 
+          "enum": [
+            "BASURA", "TRAPO TALLER", "TRAPO COMEDOR", "ESCOBA TALLER", "ESCOBA COMEDOR", 
+            "MICROONDAS", "ESCALERA", "DEPOSITO", "BAÑO", "TRAPO SALON", "ESCOBA SALON", 
+            "DESAYUNADOR", "MUEBLES"
+          ] 
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "userName", "date", "taskType", "createdAt"]
+    },
     "Message": {
       "title": "Message",
       "description": "A message in a card's chat",
@@ -176,6 +196,10 @@
     "/incidents/{incidentId}": {
       "schema": "Incident",
       "description": "Reported incidents"
+    },
+    "/dailyTasks/{taskId}": {
+      "schema": "DailyTask",
+      "description": "Daily cleaning and organization task logs"
     }
   }
 }
