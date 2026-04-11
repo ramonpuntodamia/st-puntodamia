@@ -60,9 +60,12 @@ import {
   Check,
   Download,
   Repeat,
-  FileText
+  FileText,
+  Target,
+  LineChart as LineChartIcon
 } from 'lucide-react';
 import { format } from 'date-fns';
+import { es } from 'date-fns/locale';
 import { cn } from './lib/utils';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
@@ -70,6 +73,8 @@ import 'jspdf-autotable';
 import { 
   BarChart, 
   Bar, 
+  LineChart,
+  Line,
   XAxis, 
   YAxis, 
   CartesianGrid, 
@@ -1273,33 +1278,67 @@ const KPIModal = ({ onClose, users }: KPIModalProps) => {
 
   // --- Chart Data Calculations ---
   
-  // 1. Productivity by Technician (Repaired Orders)
+  const now = new Date();
+  const currentMonth = format(now, 'yyyy-MM');
+  const currentYear = format(now, 'yyyy');
+
+  // 1. Productivity by Technician (Repaired Orders) - Current Month
   const productivityData = users
     .filter(u => u.role === 'tecnico' || u.role === 'admin')
     .map(u => ({
       name: u.displayName || 'Técnico',
-      reparadas: orders.filter(o => o.assignedTechnicianId === u.uid && o.currentStep === 'finalizada' && o.isRepaired).length,
-      noReparadas: orders.filter(o => o.assignedTechnicianId === u.uid && o.currentStep === 'finalizada' && !o.isRepaired).length
+      reparadas: orders.filter(o => 
+        o.assignedTechnicianId === u.uid && 
+        o.currentStep === 'finalizada' && 
+        o.isRepaired &&
+        o.finalizedAt && format(o.finalizedAt.toDate(), 'yyyy-MM') === currentMonth
+      ).length,
+      noReparadas: orders.filter(o => 
+        o.assignedTechnicianId === u.uid && 
+        o.currentStep === 'finalizada' && 
+        !o.isRepaired &&
+        o.finalizedAt && format(o.finalizedAt.toDate(), 'yyyy-MM') === currentMonth
+      ).length
     }))
     .sort((a, b) => b.reparadas - a.reparadas);
 
-  // 2. Incident Distribution
-  const incidentDistribution = [
-    { name: 'Garantías', value: incidents.filter(i => i.type === 'garantia').length, color: '#ef4444' },
-    { name: 'Personal', value: incidents.filter(i => i.type === 'personal').length, color: '#f59e0b' }
-  ].filter(i => i.value > 0);
-
-  // 3. Daily Task History (Last 15 days)
-  const last15Days = Array.from({ length: 15 }, (_, i) => {
+  // 2. Weekly Trend (Ingresadas vs Reparadas)
+  const last7Days = Array.from({ length: 7 }, (_, i) => {
     const d = new Date();
     d.setDate(d.getDate() - i);
     return format(d, 'yyyy-MM-dd');
   }).reverse();
 
-  const taskHistoryData = last15Days.map(date => ({
+  const weeklyTrendData = last7Days.map(date => ({
     date: format(new Date(date), 'dd/MM'),
-    count: dailyTasks.filter(t => t.date === date).length
+    ingresadas: orders.filter(o => o.createdAt && format(o.createdAt.toDate(), 'yyyy-MM-dd') === date).length,
+    reparadas: orders.filter(o => o.finalizedAt && format(o.finalizedAt.toDate(), 'yyyy-MM-dd') === date && o.isRepaired).length
   }));
+
+  // 3. Yearly History (Reparadas + No Reparadas + Garantias)
+  const months = Array.from({ length: 12 }, (_, i) => format(new Date(now.getFullYear(), i, 1), 'yyyy-MM'));
+  const yearlyHistoryData = months.map(m => ({
+    month: format(new Date(m + '-01'), 'MMM', { locale: es }),
+    reparadas: orders.filter(o => o.finalizedAt && format(o.finalizedAt.toDate(), 'yyyy-MM') === m && o.isRepaired).length,
+    noReparadas: orders.filter(o => o.finalizedAt && format(o.finalizedAt.toDate(), 'yyyy-MM') === m && !o.isRepaired).length,
+    garantias: orders.filter(o => o.createdAt && format(o.createdAt.toDate(), 'yyyy-MM') === m && o.tags?.includes('GARANTIA')).length
+  }));
+
+  // 4. Incidents by Employee (Current Month)
+  const incidentByEmployeeData = users.map(u => ({
+    name: u.displayName || 'Usuario',
+    count: incidents.filter(i => 
+      i.incidentUserId === u.uid && 
+      i.createdAt && format(i.createdAt.toDate(), 'yyyy-MM') === currentMonth
+    ).length
+  })).filter(d => d.count > 0).sort((a, b) => b.count - a.count);
+
+  // 5. Top Stats (Current Month)
+  const monthOrders = orders.filter(o => o.finalizedAt && format(o.finalizedAt.toDate(), 'yyyy-MM') === currentMonth);
+  const monthRepaired = monthOrders.filter(o => o.isRepaired).length;
+  const monthTotalFinalized = monthOrders.length;
+  const monthIncidents = incidents.filter(i => i.createdAt && format(i.createdAt.toDate(), 'yyyy-MM') === currentMonth).length;
+  const successRate = monthTotalFinalized > 0 ? Math.round((monthRepaired / monthTotalFinalized) * 100) : 0;
 
   const generateAuditPDF = () => {
     const selectedUser = users.find(u => u.uid === auditUserId);
@@ -1520,40 +1559,112 @@ const KPIModal = ({ onClose, users }: KPIModalProps) => {
           ) : (
             <div className="space-y-10">
               {/* Top Stats */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Productividad Total</p>
-                  <p className="text-3xl font-black text-slate-950">{orders.filter(o => o.currentStep === 'finalizada' && o.isRepaired).length}</p>
-                  <p className="text-[9px] text-green-600 font-bold mt-1">Órdenes Reparadas</p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm flex items-center gap-6">
+                  <div className="w-16 h-16 bg-green-50 rounded-2xl flex items-center justify-center border border-green-100">
+                    <CheckCircle2 className="w-8 h-8 text-green-600" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Productividad Total</p>
+                    <p className="text-4xl font-black text-slate-950">{monthRepaired}</p>
+                    <p className="text-[10px] text-green-600 font-bold mt-1">Reparadas este mes</p>
+                  </div>
                 </div>
-                <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Tasa de Éxito</p>
-                  <p className="text-3xl font-black text-[#00aeef]">
-                    {orders.filter(o => o.currentStep === 'finalizada').length > 0 
-                      ? Math.round((orders.filter(o => o.currentStep === 'finalizada' && o.isRepaired).length / orders.filter(o => o.currentStep === 'finalizada').length) * 100)
-                      : 0}%
-                  </p>
-                  <p className="text-[9px] text-slate-500 font-bold mt-1">Efectividad Técnica</p>
+                <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm flex items-center gap-6">
+                  <div className="w-16 h-16 bg-[#00aeef]/10 rounded-2xl flex items-center justify-center border border-[#00aeef]/20">
+                    <Target className="w-8 h-8 text-[#00aeef]" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Tasa de Éxito</p>
+                    <p className="text-4xl font-black text-[#00aeef]">{successRate}%</p>
+                    <p className="text-[10px] text-slate-500 font-bold mt-1">Efectividad Técnica</p>
+                  </div>
                 </div>
-                <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Incidencias</p>
-                  <p className="text-3xl font-black text-red-500">{incidents.length}</p>
-                  <p className="text-[9px] text-slate-500 font-bold mt-1">Alertas Registradas</p>
-                </div>
-                <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Cumplimiento Tareas</p>
-                  <p className="text-3xl font-black text-amber-600">{dailyTasks.length}</p>
-                  <p className="text-[9px] text-slate-500 font-bold mt-1">Registros de Limpieza</p>
+                <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm flex items-center gap-6">
+                  <div className="w-16 h-16 bg-red-50 rounded-2xl flex items-center justify-center border border-red-100">
+                    <AlertTriangle className="w-8 h-8 text-red-600" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Incidencias</p>
+                    <p className="text-4xl font-black text-red-600">{monthIncidents}</p>
+                    <p className="text-[10px] text-slate-500 font-bold mt-1">Registradas este mes</p>
+                  </div>
                 </div>
               </div>
 
               {/* Charts Grid */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* Productivity Chart */}
+                {/* Weekly Trend Chart */}
                 <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6">
                   <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest">Productividad por Técnico</h4>
+                    <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest">Tendencia Semanal (Ingresos vs Reparadas)</h4>
+                    <LineChartIcon className="w-4 h-4 text-slate-400" />
+                  </div>
+                  <div className="h-[300px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={weeklyTrendData}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                        <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: '#64748b' }} />
+                        <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: '#64748b' }} />
+                        <Tooltip 
+                          contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                        />
+                        <Line type="monotone" dataKey="ingresadas" stroke="#00aeef" strokeWidth={3} dot={{ r: 4, fill: '#00aeef' }} name="Ingresadas" />
+                        <Line type="monotone" dataKey="reparadas" stroke="#10b981" strokeWidth={3} dot={{ r: 4, fill: '#10b981' }} name="Reparadas" />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {/* Yearly History Chart */}
+                <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest">Histórico Anual de Calidad</h4>
                     <BarChart3 className="w-4 h-4 text-slate-400" />
+                  </div>
+                  <div className="h-[300px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={yearlyHistoryData}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                        <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: '#64748b' }} />
+                        <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: '#64748b' }} />
+                        <Tooltip 
+                          contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                        />
+                        <Bar dataKey="reparadas" stackId="a" fill="#10b981" barSize={20} name="Reparadas" />
+                        <Bar dataKey="noReparadas" stackId="a" fill="#94a3b8" barSize={20} name="No Reparadas" />
+                        <Bar dataKey="garantias" stackId="a" fill="#ef4444" barSize={20} name="Garantías" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {/* Incident by Employee Chart */}
+                <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest">Incidencias por Empleado (Mes en curso)</h4>
+                    <Users className="w-4 h-4 text-slate-400" />
+                  </div>
+                  <div className="h-[300px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={incidentByEmployeeData}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: '#64748b' }} />
+                        <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: '#64748b' }} />
+                        <Tooltip 
+                          contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                        />
+                        <Bar dataKey="count" fill="#ef4444" radius={[4, 4, 0, 0]} barSize={30} name="Incidencias" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {/* Productivity Individual Chart */}
+                <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest">Productividad Individual (Mes en curso)</h4>
+                    <Activity className="w-4 h-4 text-slate-400" />
                   </div>
                   <div className="h-[300px] w-full">
                     <ResponsiveContainer width="100%" height="100%">
@@ -1562,62 +1673,10 @@ const KPIModal = ({ onClose, users }: KPIModalProps) => {
                         <XAxis type="number" hide />
                         <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: '#64748b' }} />
                         <Tooltip 
-                          cursor={{ fill: '#f8fafc' }}
                           contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                         />
-                        <Bar dataKey="reparadas" fill="#00aeef" radius={[0, 4, 4, 0]} barSize={20} name="Reparadas" />
-                        <Bar dataKey="noReparadas" fill="#cbd5e1" radius={[0, 4, 4, 0]} barSize={20} name="No Reparadas" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-
-                {/* Incident Distribution Chart */}
-                <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest">Distribución de Incidencias</h4>
-                    <AlertTriangle className="w-4 h-4 text-slate-400" />
-                  </div>
-                  <div className="h-[300px] w-full flex items-center">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={incidentDistribution}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={60}
-                          outerRadius={100}
-                          paddingAngle={5}
-                          dataKey="value"
-                        >
-                          {incidentDistribution.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={entry.color} />
-                          ))}
-                        </Pie>
-                        <Tooltip />
-                        <Legend verticalAlign="bottom" height={36}/>
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-
-                {/* Daily Task History Chart */}
-                <div className="lg:col-span-2 bg-white p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest">Historial de Tareas Diarias (Últimos 15 días)</h4>
-                    <ClipboardList className="w-4 h-4 text-slate-400" />
-                  </div>
-                  <div className="h-[250px] w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={taskHistoryData}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                        <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: '#64748b' }} />
-                        <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: '#64748b' }} />
-                        <Tooltip 
-                          cursor={{ fill: '#f8fafc' }}
-                          contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                        />
-                        <Bar dataKey="count" fill="#f59e0b" radius={[4, 4, 0, 0]} barSize={30} name="Tareas Registradas" />
+                        <Bar dataKey="reparadas" fill="#10b981" radius={[0, 4, 4, 0]} barSize={15} name="Reparadas" />
+                        <Bar dataKey="noReparadas" fill="#94a3b8" radius={[0, 4, 4, 0]} barSize={15} name="No Reparadas" />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
