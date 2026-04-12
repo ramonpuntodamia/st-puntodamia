@@ -103,8 +103,18 @@
         "type": { "type": "string", "enum": ["garantia", "personal"] },
         "orderNumber": { "type": "string", "description": "Current order number" },
         "primaryOrderNumber": { "type": "string", "description": "Original order number for warranties" },
-        "incidentUserId": { "type": "string", "description": "User who caused the incident" },
-        "incidentUserName": { "type": "string" },
+        "involvedUsers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "userId": { "type": "string" },
+              "userName": { "type": "string" },
+              "role": { "type": "string" },
+              "responsibility": { "type": "string" }
+            }
+          }
+        },
         "solvingUserId": { "type": "string", "description": "User who solved the incident" },
         "solvingUserName": { "type": "string" },
         "solutionComment": { "type": "string", "description": "Description of the solution or incident details" },

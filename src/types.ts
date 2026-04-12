@@ -50,13 +50,19 @@ export interface Card {
   }>;
 }
 
+export interface InvolvedUser {
+  userId: string;
+  userName: string;
+  role: UserRole;
+  responsibility: string;
+}
+
 export interface Incident {
   id: string;
   type: 'garantia' | 'personal';
   orderNumber?: string; // Nro de orden actual (automático en garantía)
   primaryOrderNumber?: string; // Garantía de Orden (nro de orden primaria)
-  incidentUserId?: string; // Usuario Incidente (quien ocasionó la incidencia)
-  incidentUserName?: string;
+  involvedUsers: InvolvedUser[]; // Usuarios involucrados y sus responsabilidades
   solvingUserId?: string; // Usuario que Solucionó
   solvingUserName?: string;
   solutionComment?: string; // Caja de comentario (registro de solución)

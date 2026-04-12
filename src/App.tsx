@@ -31,6 +31,7 @@ import {
   UserReadStatus,
   UserProfile,
   Incident,
+  InvolvedUser,
   Attendance,
   DailyTask
 } from './types';
@@ -1328,7 +1329,7 @@ const KPIModal = ({ onClose, users }: KPIModalProps) => {
   const incidentByEmployeeData = users.map(u => ({
     name: u.displayName || 'Usuario',
     count: incidents.filter(i => 
-      i.incidentUserId === u.uid && 
+      i.involvedUsers?.some(iu => iu.userId === u.uid) && 
       i.createdAt && format(i.createdAt.toDate(), 'yyyy-MM') === currentMonth
     ).length
   })).filter(d => d.count > 0).sort((a, b) => b.count - a.count);
@@ -1357,7 +1358,7 @@ const KPIModal = ({ onClose, users }: KPIModalProps) => {
     );
     
     const userIncidents = incidents.filter(i => 
-      i.incidentUserId === auditUserId && 
+      i.involvedUsers?.some(iu => iu.userId === auditUserId) && 
       i.createdAt?.toDate() >= start && 
       i.createdAt?.toDate() <= end
     );
@@ -1426,14 +1427,17 @@ const KPIModal = ({ onClose, users }: KPIModalProps) => {
     doc.text('DETALLE DE INCIDENCIAS', 14, finalY1);
     (doc as any).autoTable({
       startY: finalY1 + 5,
-      head: [['Fecha', 'Tipo', 'Orden', 'Solución / Registro', 'Estado']],
-      body: userIncidents.map(i => [
-        formatTimestamp(i.createdAt, 'dd/MM/yy'),
-        i.type === 'garantia' ? 'GARANTÍA' : 'PERSONAL',
-        i.type === 'garantia' ? `#${i.orderNumber} (Ref: #${i.primaryOrderNumber})` : 'N/A',
-        i.solutionComment,
-        i.status.toUpperCase()
-      ]),
+      head: [['Fecha', 'Tipo', 'Orden', 'Responsabilidad / Solución', 'Estado']],
+      body: userIncidents.map(i => {
+        const myResponsibility = i.involvedUsers?.find(iu => iu.userId === auditUserId)?.responsibility || '';
+        return [
+          formatTimestamp(i.createdAt, 'dd/MM/yy'),
+          i.type === 'garantia' ? 'GARANTÍA' : 'PERSONAL',
+          i.type === 'garantia' ? `#${i.orderNumber} (Ref: #${i.primaryOrderNumber})` : 'N/A',
+          `${myResponsibility}\nSolución: ${i.solutionComment}`,
+          i.status.toUpperCase()
+        ];
+      }),
       theme: 'grid',
       headStyles: { fillColor: [239, 68, 68] }
     });
@@ -1730,7 +1734,9 @@ const IncidentsManagementModal = ({ onClose, users, user }: IncidentsManagementM
   const [type, setType] = useState<'garantia' | 'personal'>('personal');
   const [orderNumber, setOrderNumber] = useState('');
   const [primaryOrderNumber, setPrimaryOrderNumber] = useState('');
-  const [incidentUserId, setIncidentUserId] = useState('');
+  const [involvedUsers, setInvolvedUsers] = useState<InvolvedUser[]>([]);
+  const [currentInvolvedUserId, setCurrentInvolvedUserId] = useState('');
+  const [currentResponsibility, setCurrentResponsibility] = useState('');
   const [solvingUserId, setSolvingUserId] = useState('');
   const [solutionComment, setSolutionComment] = useState('');
   const [status, setStatus] = useState<'abierta' | 'resuelta'>('abierta');
@@ -1756,8 +1762,16 @@ const IncidentsManagementModal = ({ onClose, users, user }: IncidentsManagementM
           const snapshot = await getDocs(q);
           if (!snapshot.empty) {
             const cardData = snapshot.docs[0].data() as CardType;
-            if (cardData.assignedTechnicianId) {
-              setIncidentUserId(cardData.assignedTechnicianId);
+            if (cardData.assignedTechnicianId && !involvedUsers.some(u => u.userId === cardData.assignedTechnicianId)) {
+              const tech = users.find(u => u.uid === cardData.assignedTechnicianId);
+              if (tech) {
+                setInvolvedUsers(prev => [...prev, {
+                  userId: tech.uid,
+                  userName: tech.displayName || 'Técnico',
+                  role: tech.role,
+                  responsibility: 'Técnico responsable de la reparación original'
+                }]);
+              }
             }
           }
         } catch (error) {
@@ -1769,17 +1783,38 @@ const IncidentsManagementModal = ({ onClose, users, user }: IncidentsManagementM
     }
   }, [primaryOrderNumber, type]);
 
+  const addInvolvedUser = () => {
+    if (!currentInvolvedUserId || !currentResponsibility) return;
+    const userToInvolve = users.find(u => u.uid === currentInvolvedUserId);
+    if (userToInvolve && !involvedUsers.some(u => u.userId === currentInvolvedUserId)) {
+      setInvolvedUsers([...involvedUsers, {
+        userId: userToInvolve.uid,
+        userName: userToInvolve.displayName || 'Usuario',
+        role: userToInvolve.role,
+        responsibility: currentResponsibility
+      }]);
+      setCurrentInvolvedUserId('');
+      setCurrentResponsibility('');
+    }
+  };
+
+  const removeInvolvedUser = (uid: string) => {
+    setInvolvedUsers(involvedUsers.filter(u => u.userId !== uid));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const incidentUser = users.find(u => u.uid === incidentUserId);
+    if (involvedUsers.length === 0) {
+      alert("Debes agregar al menos un usuario involucrado");
+      return;
+    }
     const solvingUser = users.find(u => u.uid === solvingUserId);
     
     const incidentData = {
       type,
       orderNumber: type === 'garantia' ? orderNumber : null,
       primaryOrderNumber: type === 'garantia' ? primaryOrderNumber : null,
-      incidentUserId: incidentUserId || null,
-      incidentUserName: incidentUser?.displayName || null,
+      involvedUsers,
       solvingUserId: solvingUserId || null,
       solvingUserName: solvingUser?.displayName || null,
       solutionComment,
@@ -1810,7 +1845,9 @@ const IncidentsManagementModal = ({ onClose, users, user }: IncidentsManagementM
     setEditingId(null);
     setOrderNumber('');
     setPrimaryOrderNumber('');
-    setIncidentUserId('');
+    setInvolvedUsers([]);
+    setCurrentInvolvedUserId('');
+    setCurrentResponsibility('');
     setSolvingUserId('');
     setSolutionComment('');
     setStatus('abierta');
@@ -1822,7 +1859,7 @@ const IncidentsManagementModal = ({ onClose, users, user }: IncidentsManagementM
     setType(incident.type);
     setOrderNumber(incident.orderNumber || '');
     setPrimaryOrderNumber(incident.primaryOrderNumber || '');
-    setIncidentUserId(incident.incidentUserId || '');
+    setInvolvedUsers(incident.involvedUsers || []);
     setSolvingUserId(incident.solvingUserId || '');
     setSolutionComment(incident.solutionComment || '');
     setStatus(incident.status);
@@ -1914,19 +1951,71 @@ const IncidentsManagementModal = ({ onClose, users, user }: IncidentsManagementM
                   </>
                 )}
 
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Usuario Incidente (Responsable)</label>
-                  <select 
-                    value={incidentUserId}
-                    onChange={e => setIncidentUserId(e.target.value)}
-                    required
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-[#00aeef]/50"
-                  >
-                    <option value="">Seleccionar usuario...</option>
-                    {users.map(u => (
-                      <option key={u.uid} value={u.uid}>{u.displayName} ({u.role})</option>
-                    ))}
-                  </select>
+                <div className="md:col-span-2 bg-slate-50 p-6 rounded-2xl border border-slate-200 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[10px] font-black text-slate-950 uppercase tracking-widest flex items-center gap-2">
+                      <Users className="w-4 h-4 text-[#00aeef]" />
+                      Personal Involucrado y Responsabilidades
+                    </h4>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                    <div className="space-y-2">
+                      <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Seleccionar Usuario</label>
+                      <select 
+                        value={currentInvolvedUserId}
+                        onChange={e => setCurrentInvolvedUserId(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold focus:outline-none focus:border-[#00aeef]/50"
+                      >
+                        <option value="">Seleccionar...</option>
+                        {users.map(u => (
+                          <option key={u.uid} value={u.uid}>{u.displayName} ({u.role})</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Responsabilidad / Error</label>
+                      <input 
+                        type="text"
+                        value={currentResponsibility}
+                        onChange={e => setCurrentResponsibility(e.target.value)}
+                        placeholder="Ej: Error en ingreso de modelo"
+                        className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-xs font-bold focus:outline-none focus:border-[#00aeef]/50"
+                      />
+                    </div>
+                    <button 
+                      type="button"
+                      onClick={addInvolvedUser}
+                      className="h-[42px] bg-slate-900 text-white rounded-xl font-black text-[9px] uppercase tracking-widest hover:bg-slate-800 transition-all"
+                    >
+                      Agregar a la lista
+                    </button>
+                  </div>
+
+                  {involvedUsers.length > 0 && (
+                    <div className="mt-4 space-y-2">
+                      {involvedUsers.map(u => (
+                        <div key={u.userId} className="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 bg-slate-50 rounded-lg flex items-center justify-center text-[10px] font-black text-slate-400">
+                              {u.userName.charAt(0)}
+                            </div>
+                            <div>
+                              <p className="text-xs font-black text-slate-900">{u.userName}</p>
+                              <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">{u.responsibility}</p>
+                            </div>
+                          </div>
+                          <button 
+                            type="button"
+                            onClick={() => removeInvolvedUser(u.userId)}
+                            className="p-2 hover:bg-red-50 rounded-lg text-slate-300 hover:text-red-500 transition-all"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -2018,15 +2107,22 @@ const IncidentsManagementModal = ({ onClose, users, user }: IncidentsManagementM
                             ) : 'N/A'}
                           </p>
                         </div>
-                        <div className="space-y-1">
-                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Responsable / Solucionó</p>
-                          <p className="text-xs font-bold text-slate-900">
-                            {incident.incidentUserName} <span className="text-slate-300 mx-1">/</span> {incident.solvingUserName}
-                          </p>
+                        <div className="space-y-2">
+                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Personal Involucrado</p>
+                          <div className="flex flex-wrap gap-2">
+                            {incident.involvedUsers?.map(u => (
+                              <div key={u.userId} className="flex flex-col bg-slate-50 px-2 py-1 rounded-lg border border-slate-100">
+                                <span className="text-[9px] font-black text-slate-900">{u.userName}</span>
+                                <span className="text-[7px] text-slate-500 font-bold uppercase tracking-tighter">{u.responsibility}</span>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                         <div className="space-y-1">
-                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Fecha Registro</p>
-                          <p className="text-xs font-bold text-slate-900">{formatTimestamp(incident.createdAt, 'dd/MM/yyyy HH:mm')}</p>
+                          <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Solucionó / Fecha</p>
+                          <p className="text-xs font-bold text-slate-900">
+                            {incident.solvingUserName} <span className="text-slate-300 mx-1">|</span> {formatTimestamp(incident.createdAt, 'dd/MM/yy HH:mm')}
+                          </p>
                         </div>
                       </div>
 
