@@ -70,6 +70,8 @@ export interface Incident {
   createdAt: Timestamp;
   reportedBy: string; // Quien registra la incidencia
   reportedByName: string;
+  incidentUserId?: string; // Legacy field
+  incidentUserName?: string; // Legacy field
 }
 
 export interface Attendance {

@@ -1243,14 +1243,16 @@ const UserActivityModal = ({ onClose, user }: UserActivityModalProps) => {
 interface KPIModalProps {
   onClose: () => void;
   users: UserProfile[];
+  incidents: Incident[];
+  orders: CardType[];
 }
 
-const KPIModal = ({ onClose, users }: KPIModalProps) => {
+const KPIModal = ({ onClose, users, incidents: parentIncidents, orders: parentOrders }: KPIModalProps) => {
   const [attendances, setAttendances] = useState<Attendance[]>([]);
   const [dailyTasks, setDailyTasks] = useState<DailyTask[]>([]);
-  const [orders, setOrders] = useState<CardType[]>([]);
-  const [incidents, setIncidents] = useState<Incident[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [orders, setOrders] = useState<CardType[]>(parentOrders);
+  const [incidents, setIncidents] = useState<Incident[]>(parentIncidents);
+  const [loading, setLoading] = useState(false);
   const [showAuditForm, setShowAuditForm] = useState(false);
   
   // Audit state
@@ -1260,22 +1262,28 @@ const KPIModal = ({ onClose, users }: KPIModalProps) => {
 
   useEffect(() => {
     const fetchAllData = async () => {
-      const [attSnap, taskSnap, orderSnap, incSnap] = await Promise.all([
+      setLoading(true);
+      const [attSnap, taskSnap] = await Promise.all([
         getDocs(collection(db, 'attendance')),
-        getDocs(collection(db, 'dailyTasks')),
-        getDocs(collection(db, 'cards')),
-        getDocs(collection(db, 'incidents'))
+        getDocs(collection(db, 'dailyTasks'))
       ]);
 
       setAttendances(attSnap.docs.map(d => ({ id: d.id, ...d.data() } as Attendance)));
       setDailyTasks(taskSnap.docs.map(d => ({ id: d.id, ...d.data() } as DailyTask)));
-      setOrders(orderSnap.docs.map(d => ({ id: d.id, ...d.data() } as CardType)));
-      setIncidents(incSnap.docs.map(d => ({ id: d.id, ...d.data() } as Incident)));
       setLoading(false);
     };
 
     fetchAllData();
   }, []);
+
+  // Update local state when props change (for real-time updates)
+  useEffect(() => {
+    setIncidents(parentIncidents);
+  }, [parentIncidents]);
+
+  useEffect(() => {
+    setOrders(parentOrders);
+  }, [parentOrders]);
 
   // --- Chart Data Calculations ---
   
@@ -1310,35 +1318,61 @@ const KPIModal = ({ onClose, users }: KPIModalProps) => {
     return format(d, 'yyyy-MM-dd');
   }).reverse();
 
-  const weeklyTrendData = last7Days.map(date => ({
-    date: format(new Date(date), 'dd/MM'),
-    ingresadas: orders.filter(o => o.createdAt && format(o.createdAt.toDate(), 'yyyy-MM-dd') === date).length,
-    reparadas: orders.filter(o => o.finalizedAt && format(o.finalizedAt.toDate(), 'yyyy-MM-dd') === date && o.isRepaired).length
-  }));
+  const weeklyTrendData = last7Days.map(date => {
+    const [year, month, day] = date.split('-').map(Number);
+    return {
+      date: `${day}/${month}`,
+      ingresadas: orders.filter(o => o.createdAt && format(o.createdAt.toDate(), 'yyyy-MM-dd') === date).length,
+      reparadas: orders.filter(o => o.finalizedAt && format(o.finalizedAt.toDate(), 'yyyy-MM-dd') === date && o.isRepaired).length
+    };
+  });
 
   // 3. Yearly History (Reparadas + No Reparadas + Garantias)
-  const months = Array.from({ length: 12 }, (_, i) => format(new Date(now.getFullYear(), i, 1), 'yyyy-MM'));
-  const yearlyHistoryData = months.map(m => ({
-    month: format(new Date(m + '-01'), 'MMM', { locale: es }),
-    reparadas: orders.filter(o => o.finalizedAt && format(o.finalizedAt.toDate(), 'yyyy-MM') === m && o.isRepaired).length,
-    noReparadas: orders.filter(o => o.finalizedAt && format(o.finalizedAt.toDate(), 'yyyy-MM') === m && !o.isRepaired).length,
-    garantias: orders.filter(o => o.createdAt && format(o.createdAt.toDate(), 'yyyy-MM') === m && o.tags?.includes('GARANTIA')).length
-  }));
+  const yearlyHistoryData = Array.from({ length: 12 }, (_, i) => {
+    const d = new Date(now.getFullYear(), i, 1);
+    const m = format(d, 'yyyy-MM');
+    return {
+      month: format(d, 'MMM', { locale: es }),
+      reparadas: orders.filter(o => o.finalizedAt && format(o.finalizedAt.toDate(), 'yyyy-MM') === m && o.isRepaired).length,
+      noReparadas: orders.filter(o => o.finalizedAt && format(o.finalizedAt.toDate(), 'yyyy-MM') === m && !o.isRepaired).length,
+      garantias: orders.filter(o => o.createdAt && format(o.createdAt.toDate(), 'yyyy-MM') === m && o.tags?.includes('GARANTIA')).length
+    };
+  });
 
   // 4. Incidents by Employee (Current Month)
   const incidentByEmployeeData = users.map(u => ({
     name: u.displayName || 'Usuario',
-    count: incidents.filter(i => 
-      i.involvedUsers?.some(iu => iu.userId === u.uid) && 
-      i.createdAt && format(i.createdAt.toDate(), 'yyyy-MM') === currentMonth
-    ).length
+    count: incidents.filter(i => {
+      const isInvolved = (i.involvedUsers && Array.isArray(i.involvedUsers) && i.involvedUsers.some(iu => iu.userId === u.uid)) || 
+                         i.incidentUserId === u.uid || 
+                         i.solvingUserId === u.uid;
+      let isThisMonth = false;
+      if (i.createdAt) {
+        try {
+          const date = typeof i.createdAt.toDate === 'function' ? i.createdAt.toDate() : 
+                       (i.createdAt.seconds ? new Date(i.createdAt.seconds * 1000) : new Date(i.createdAt));
+          isThisMonth = format(date, 'yyyy-MM') === currentMonth;
+        } catch (e) {
+          isThisMonth = false;
+        }
+      }
+      return isInvolved && isThisMonth;
+    }).length
   })).filter(d => d.count > 0).sort((a, b) => b.count - a.count);
 
   // 5. Top Stats (Current Month)
   const monthOrders = orders.filter(o => o.finalizedAt && format(o.finalizedAt.toDate(), 'yyyy-MM') === currentMonth);
   const monthRepaired = monthOrders.filter(o => o.isRepaired).length;
   const monthTotalFinalized = monthOrders.length;
-  const monthIncidents = incidents.filter(i => i.createdAt && format(i.createdAt.toDate(), 'yyyy-MM') === currentMonth).length;
+  const monthIncidents = incidents.filter(i => {
+    if (!i.createdAt) return false;
+    try {
+      const date = typeof i.createdAt.toDate === 'function' ? i.createdAt.toDate() : new Date(i.createdAt.seconds * 1000);
+      return format(date, 'yyyy-MM') === currentMonth;
+    } catch (e) {
+      return false;
+    }
+  }).length;
   const successRate = monthTotalFinalized > 0 ? Math.round((monthRepaired / monthTotalFinalized) * 100) : 0;
 
   const generateAuditPDF = () => {
@@ -1347,8 +1381,10 @@ const KPIModal = ({ onClose, users }: KPIModalProps) => {
 
     const doc = new jsPDF();
     const now = format(new Date(), 'dd/MM/yyyy HH:mm');
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+    const [sYear, sMonth, sDay] = startDate.split('-').map(Number);
+    const [eYear, eMonth, eDay] = endDate.split('-').map(Number);
+    const start = new Date(sYear, sMonth - 1, sDay, 0, 0, 0);
+    const end = new Date(eYear, eMonth - 1, eDay, 23, 59, 59, 999);
 
     // Filter data for the audit
     const userOrders = orders.filter(o => 
@@ -1591,7 +1627,7 @@ const KPIModal = ({ onClose, users }: KPIModalProps) => {
                   <div>
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Incidencias</p>
                     <p className="text-4xl font-black text-red-600">{monthIncidents}</p>
-                    <p className="text-[10px] text-slate-500 font-bold mt-1">Registradas este mes</p>
+                    <p className="text-[10px] text-slate-500 font-bold mt-1">Registradas este mes | {users.length} usuarios</p>
                   </div>
                 </div>
               </div>
@@ -1650,17 +1686,24 @@ const KPIModal = ({ onClose, users }: KPIModalProps) => {
                     <Users className="w-4 h-4 text-slate-400" />
                   </div>
                   <div className="h-[300px] w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={incidentByEmployeeData}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: '#64748b' }} />
-                        <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: '#64748b' }} />
-                        <Tooltip 
-                          contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                        />
-                        <Bar dataKey="count" fill="#ef4444" radius={[4, 4, 0, 0]} barSize={30} name="Incidencias" />
-                      </BarChart>
-                    </ResponsiveContainer>
+                    {incidentByEmployeeData.length === 0 ? (
+                      <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-2">
+                        <AlertTriangle className="w-8 h-8 opacity-20" />
+                        <p className="text-xs font-medium italic">No hay incidencias registradas este mes</p>
+                      </div>
+                    ) : (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={incidentByEmployeeData}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                          <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: '#64748b' }} />
+                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fontWeight: 700, fill: '#64748b' }} />
+                          <Tooltip 
+                            contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                          />
+                          <Bar dataKey="count" fill="#ef4444" radius={[4, 4, 0, 0]} barSize={30} name="Incidencias" />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    )}
                   </div>
                 </div>
 
@@ -3259,6 +3302,8 @@ export default function App() {
         <KPIModal 
           onClose={() => setShowKPIs(false)}
           users={users}
+          incidents={incidents}
+          orders={cards}
         />
       )}
 
