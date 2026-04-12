@@ -76,6 +76,8 @@ import {
   Bar, 
   LineChart,
   Line,
+  AreaChart,
+  Area,
   XAxis, 
   YAxis, 
   CartesianGrid, 
@@ -1089,34 +1091,78 @@ const AttendanceManagementModal = ({ onClose, users }: AttendanceManagementModal
 interface UserActivityModalProps {
   onClose: () => void;
   user: User;
+  allOrders: CardType[];
+  allIncidents: Incident[];
 }
 
-const UserActivityModal = ({ onClose, user }: UserActivityModalProps) => {
+const UserActivityModal = ({ onClose, user, allOrders, allIncidents }: UserActivityModalProps) => {
   const [attendances, setAttendances] = useState<Attendance[]>([]);
   const [dailyTasks, setDailyTasks] = useState<DailyTask[]>([]);
-  const [orders, setOrders] = useState<CardType[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchActivity = async () => {
-      const attQ = query(collection(db, 'attendance'), where('userId', '==', user.uid), orderBy('date', 'desc'), limit(20));
-      const taskQ = query(collection(db, 'dailyTasks'), where('userId', '==', user.uid), orderBy('date', 'desc'), limit(20));
-      const orderQ = query(collection(db, 'cards'), where('assignedTechnicianId', '==', user.uid), orderBy('createdAt', 'desc'), limit(20));
+      setLoading(true);
+      const attQ = query(collection(db, 'attendance'), where('userId', '==', user.uid), orderBy('date', 'desc'), limit(31));
+      const taskQ = query(collection(db, 'dailyTasks'), where('userId', '==', user.uid), orderBy('date', 'desc'), limit(31));
 
-      const [attSnap, taskSnap, orderSnap] = await Promise.all([
+      const [attSnap, taskSnap] = await Promise.all([
         getDocs(attQ),
-        getDocs(taskQ),
-        getDocs(orderQ)
+        getDocs(taskQ)
       ]);
 
       setAttendances(attSnap.docs.map(d => ({ id: d.id, ...d.data() } as Attendance)));
       setDailyTasks(taskSnap.docs.map(d => ({ id: d.id, ...d.data() } as DailyTask)));
-      setOrders(orderSnap.docs.map(d => ({ id: d.id, ...d.data() } as CardType)));
       setLoading(false);
     };
 
     fetchActivity();
   }, [user.uid]);
+
+  const now = new Date();
+  const currentMonth = format(now, 'yyyy-MM');
+
+  // Filter user specific data
+  const userOrders = allOrders.filter(o => o.assignedTechnicianId === user.uid);
+  const userIncidents = allIncidents.filter(i => 
+    i.involvedUsers?.some(iu => iu.userId === user.uid) || i.incidentUserId === user.uid
+  );
+
+  // Stats for the month
+  const monthOrders = userOrders.filter(o => o.finalizedAt && format(o.finalizedAt.toDate(), 'yyyy-MM') === currentMonth);
+  const monthRepaired = monthOrders.filter(o => o.isRepaired).length;
+  const monthNoRepaired = monthOrders.filter(o => !o.isRepaired).length;
+  const monthIncidents = userIncidents.filter(i => {
+    if (!i.createdAt) return false;
+    const date = typeof i.createdAt.toDate === 'function' ? i.createdAt.toDate() : new Date(i.createdAt.seconds * 1000);
+    return format(date, 'yyyy-MM') === currentMonth;
+  }).length;
+
+  // Quality Score: Reparadas / (Totales + Garantias)
+  const qualityScore = monthOrders.length > 0 ? Math.round((monthRepaired / (monthOrders.length + monthIncidents)) * 100) : 0;
+
+  // Daily Progress (Last 7 Days)
+  const last7Days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    return format(d, 'yyyy-MM-dd');
+  }).reverse();
+
+  const dailyProgressData = last7Days.map(date => {
+    const [y, m, d] = date.split('-').map(Number);
+    return {
+      date: `${d}/${m}`,
+      reparadas: userOrders.filter(o => o.finalizedAt && format(o.finalizedAt.toDate(), 'yyyy-MM-dd') === date && o.isRepaired).length,
+      noReparadas: userOrders.filter(o => o.finalizedAt && format(o.finalizedAt.toDate(), 'yyyy-MM-dd') === date && !o.isRepaired).length
+    };
+  });
+
+  // Monthly Accumulation
+  const monthlyAccumulationData = [
+    { name: 'Reparadas', value: monthRepaired, fill: '#10b981' },
+    { name: 'No Reparadas', value: monthNoRepaired, fill: '#94a3b8' },
+    { name: 'Incidencias', value: monthIncidents, fill: '#ef4444' }
+  ];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
@@ -1139,35 +1185,116 @@ const UserActivityModal = ({ onClose, user }: UserActivityModalProps) => {
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-8 scrollbar-none space-y-10">
+        <div className="flex-1 overflow-y-auto p-8 scrollbar-none space-y-12">
           {loading ? (
             <div className="flex items-center justify-center h-full">
               <RefreshCw className="w-8 h-8 text-[#00aeef] animate-spin" />
             </div>
           ) : (
             <>
-              {/* Daily Tasks Section */}
+              {/* Stats Overview */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Reparadas (Mes)</p>
+                  <p className="text-2xl font-black text-slate-900">{monthRepaired}</p>
+                </div>
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">No Reparadas</p>
+                  <p className="text-2xl font-black text-slate-600">{monthNoRepaired}</p>
+                </div>
+                <div className="bg-red-50 p-4 rounded-2xl border border-red-100">
+                  <p className="text-[10px] font-black text-red-400 uppercase tracking-widest mb-1">Incidencias</p>
+                  <p className="text-2xl font-black text-red-600">{monthIncidents}</p>
+                </div>
+                <div className="bg-[#00aeef]/5 p-4 rounded-2xl border border-[#00aeef]/10">
+                  <p className="text-[10px] font-black text-[#00aeef] uppercase tracking-widest mb-1">Score de Calidad</p>
+                  <p className="text-2xl font-black text-[#00aeef]">{qualityScore}%</p>
+                </div>
+              </div>
+
+              {/* Charts Section */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-[#00aeef]" />
+                    <h4 className="text-xs font-black text-slate-950 uppercase tracking-widest">Progreso Diario (7 días)</h4>
+                  </div>
+                  <div className="h-[200px] w-full bg-slate-50/50 p-4 rounded-2xl border border-slate-100">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={dailyProgressData}>
+                        <defs>
+                          <linearGradient id="colorRep" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                            <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                        <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 9, fontWeight: 700, fill: '#64748b' }} />
+                        <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 9, fontWeight: 700, fill: '#64748b' }} />
+                        <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                        <Area type="monotone" dataKey="reparadas" stroke="#10b981" fillOpacity={1} fill="url(#colorRep)" strokeWidth={2} name="Reparadas" />
+                        <Area type="monotone" dataKey="noReparadas" stroke="#94a3b8" fillOpacity={0} strokeWidth={2} name="No Reparadas" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <BarChart3 className="w-4 h-4 text-[#00aeef]" />
+                    <h4 className="text-xs font-black text-slate-950 uppercase tracking-widest">Acumulado Mensual</h4>
+                  </div>
+                  <div className="h-[200px] w-full bg-slate-50/50 p-4 rounded-2xl border border-slate-100">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={monthlyAccumulationData}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 9, fontWeight: 700, fill: '#64748b' }} />
+                        <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 9, fontWeight: 700, fill: '#64748b' }} />
+                        <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                        <Bar dataKey="value" radius={[4, 4, 0, 0]} barSize={40} name="Cantidad" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              </div>
+
+              {/* Incidents Section */}
               <section className="space-y-4">
                 <div className="flex items-center gap-2">
-                  <ClipboardList className="w-4 h-4 text-[#00aeef]" />
-                  <h4 className="text-xs font-black text-slate-950 uppercase tracking-widest">Tareas de Limpieza y Orden</h4>
+                  <AlertTriangle className="w-4 h-4 text-red-500" />
+                  <h4 className="text-xs font-black text-slate-950 uppercase tracking-widest">Mis Incidencias del Mes</h4>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {dailyTasks.map(task => (
-                    <div key={task.id} className="bg-slate-50 border border-slate-200 p-3 rounded-xl flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-green-100 text-green-600 rounded-lg flex items-center justify-center">
-                          <Check className="w-4 h-4" />
+                <div className="space-y-2">
+                  {userIncidents.filter(i => {
+                    if (!i.createdAt) return false;
+                    const date = typeof i.createdAt.toDate === 'function' ? i.createdAt.toDate() : new Date(i.createdAt.seconds * 1000);
+                    return format(date, 'yyyy-MM') === currentMonth;
+                  }).map(incident => (
+                    <div key={incident.id} className="bg-red-50/30 border border-red-100 p-4 rounded-2xl">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-0.5 bg-red-100 text-red-700 text-[8px] font-black uppercase rounded tracking-widest">
+                            {incident.type}
+                          </span>
+                          <p className="text-xs font-black text-slate-900">Orden #{incident.orderNumber || incident.primaryOrderNumber}</p>
                         </div>
-                        <div>
-                          <p className="text-[11px] font-black text-slate-900 uppercase tracking-tight">{task.taskType}</p>
-                          <p className="text-[9px] text-slate-500 font-bold">{task.date}</p>
-                        </div>
+                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+                          {incident.createdAt && format(incident.createdAt.toDate(), 'dd/MM/yyyy')}
+                        </span>
                       </div>
-                      <span className="text-[8px] font-black text-green-600 uppercase tracking-widest bg-green-50 px-2 py-0.5 rounded border border-green-100">Completado</span>
+                      <p className="text-[10px] text-slate-600 font-medium">
+                        <span className="font-black text-slate-900 uppercase">Responsabilidad:</span> {
+                          incident.involvedUsers?.find(iu => iu.userId === user.uid)?.responsibility || 'Involucrado'
+                        }
+                      </p>
+                      {incident.solutionComment && (
+                        <div className="mt-2 p-2 bg-white/50 rounded-lg border border-red-100/50">
+                          <p className="text-[9px] text-slate-500 italic">Solución: {incident.solutionComment}</p>
+                        </div>
+                      )}
                     </div>
                   ))}
-                  {dailyTasks.length === 0 && <p className="text-[10px] text-slate-400 italic">No hay tareas registradas recientemente.</p>}
+                  {userIncidents.length === 0 && <p className="text-[10px] text-slate-400 italic">No tienes incidencias registradas este mes.</p>}
                 </div>
               </section>
 
@@ -1175,9 +1302,9 @@ const UserActivityModal = ({ onClose, user }: UserActivityModalProps) => {
               <section className="space-y-4">
                 <div className="flex items-center gap-2">
                   <CalendarCheck className="w-4 h-4 text-[#00aeef]" />
-                  <h4 className="text-xs font-black text-slate-950 uppercase tracking-widest">Novedades de Asistencia</h4>
+                  <h4 className="text-xs font-black text-slate-950 uppercase tracking-widest">Asistencia y Puntualidad</h4>
                 </div>
-                <div className="space-y-2">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {attendances.map(att => (
                     <div key={att.id} className="bg-white border border-slate-200 p-4 rounded-2xl flex items-center justify-between">
                       <div className="flex items-center gap-4">
@@ -1207,29 +1334,28 @@ const UserActivityModal = ({ onClose, user }: UserActivityModalProps) => {
                 </div>
               </section>
 
-              {/* Orders Section */}
+              {/* Daily Tasks Section */}
               <section className="space-y-4">
                 <div className="flex items-center gap-2">
-                  <Layout className="w-4 h-4 text-[#00aeef]" />
-                  <h4 className="text-xs font-black text-slate-950 uppercase tracking-widest">Órdenes Asignadas Recientes</h4>
+                  <ClipboardList className="w-4 h-4 text-[#00aeef]" />
+                  <h4 className="text-xs font-black text-slate-950 uppercase tracking-widest">Tareas de Limpieza y Orden</h4>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {orders.map(order => (
-                    <div key={order.id} className="bg-white border border-slate-200 p-4 rounded-2xl hover:border-[#00aeef]/30 transition-all">
-                      <div className="flex items-center justify-between mb-2">
-                        <p className="text-sm font-black text-slate-900">#{order.title}</p>
-                        <span className={cn(
-                          "px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest",
-                          order.currentStep === 'finalizada' ? "bg-green-50 text-green-600" :
-                          order.currentStep === 'espera' ? "bg-amber-50 text-amber-600" : "bg-blue-50 text-blue-600"
-                        )}>
-                          {order.currentStep}
-                        </span>
+                  {dailyTasks.map(task => (
+                    <div key={task.id} className="bg-slate-50 border border-slate-200 p-3 rounded-xl flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 bg-green-100 text-green-600 rounded-lg flex items-center justify-center">
+                          <Check className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="text-[11px] font-black text-slate-900 uppercase tracking-tight">{task.taskType}</p>
+                          <p className="text-[9px] text-slate-500 font-bold">{task.date}</p>
+                        </div>
                       </div>
-                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Creada: {formatTimestamp(order.createdAt, 'dd/MM/yyyy')}</p>
+                      <span className="text-[8px] font-black text-green-600 uppercase tracking-widest bg-green-50 px-2 py-0.5 rounded border border-green-100">Completado</span>
                     </div>
                   ))}
-                  {orders.length === 0 && <p className="text-[10px] text-slate-400 italic">No tienes órdenes asignadas recientemente.</p>}
+                  {dailyTasks.length === 0 && <p className="text-[10px] text-slate-400 italic">No hay tareas registradas recientemente.</p>}
                 </div>
               </section>
             </>
@@ -1399,17 +1525,19 @@ const KPIModal = ({ onClose, users, incidents: parentIncidents, orders: parentOr
       i.createdAt?.toDate() <= end
     );
 
-    const userAttendance = attendances.filter(a => 
-      a.userId === auditUserId && 
-      new Date(a.date) >= start && 
-      new Date(a.date) <= end
-    );
+    const userAttendance = attendances.filter(a => {
+      if (a.userId !== auditUserId) return false;
+      const [y, m, d] = a.date.split('-').map(Number);
+      const attDate = new Date(y, m - 1, d);
+      return attDate >= start && attDate <= end;
+    });
 
-    const userTasks = dailyTasks.filter(t => 
-      t.userId === auditUserId && 
-      new Date(t.date) >= start && 
-      new Date(t.date) <= end
-    );
+    const userTasks = dailyTasks.filter(t => {
+      if (t.userId !== auditUserId) return false;
+      const [y, m, d] = t.date.split('-').map(Number);
+      const taskDate = new Date(y, m - 1, d);
+      return taskDate >= start && taskDate <= end;
+    });
 
     // Calculate days without task
     const activeDays = new Set(userOrders.filter(o => o.createdAt).map(o => format(o.createdAt.toDate(), 'yyyy-MM-dd')));
@@ -3296,6 +3424,8 @@ export default function App() {
         <UserActivityModal 
           onClose={() => setShowUserActivity(false)}
           user={user}
+          allOrders={cards}
+          allIncidents={incidents}
         />
       )}
       {showKPIs && (
