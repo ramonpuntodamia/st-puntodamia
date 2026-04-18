@@ -178,13 +178,13 @@ service cloud.firestore {
     }
 
     function isValidIncident(data) {
-      return hasRequiredFields(['type', 'status', 'reportedBy', 'reportedByName', 'createdAt']) &&
-             data.keys().hasOnly(['type', 'orderNumber', 'primaryOrderNumber', 'incidentUserId', 'incidentUserName', 'solvingUserId', 'solvingUserName', 'solutionComment', 'status', 'reportedBy', 'reportedByName', 'createdAt']) &&
+      return hasRequiredFields(['type', 'status', 'reportedBy', 'reportedByName', 'createdAt', 'involvedUsers']) &&
              data.type in ['garantia', 'personal'] &&
              data.status in ['abierta', 'resuelta'] &&
              data.reportedBy is string &&
              data.reportedByName is string &&
              data.createdAt is timestamp &&
+             data.involvedUsers is list &&
              (!('orderNumber' in data) || data.orderNumber == null || data.orderNumber is string) &&
              (!('primaryOrderNumber' in data) || data.primaryOrderNumber == null || data.primaryOrderNumber is string) &&
              (!('incidentUserId' in data) || data.incidentUserId == null || data.incidentUserId is string) &&
