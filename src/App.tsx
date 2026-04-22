@@ -20,6 +20,7 @@ import {
   getDocsFromServer,
   getDoc,
   deleteDoc,
+  deleteField,
   Timestamp,
   where
 } from 'firebase/firestore';
@@ -494,6 +495,7 @@ interface CardDetailModalProps {
   onPausar: (comment: string) => void;
   onReanudar: (comment: string) => void;
   onFinalizar: (isRepaired: boolean, comment: string) => void;
+  onReabrir: (comment: string) => void;
 }
 
 const CardDetailModal = ({ 
@@ -503,7 +505,8 @@ const CardDetailModal = ({
   onClose,
   onPausar,
   onReanudar,
-  onFinalizar
+  onFinalizar,
+  onReabrir
 }: CardDetailModalProps) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
@@ -511,6 +514,8 @@ const CardDetailModal = ({
   const [showFinalizeForm, setShowFinalizeForm] = useState(false);
   const [actionComment, setActionComment] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const [isReopening, setIsReopening] = useState(false);
 
   useEffect(() => {
     const q = query(
@@ -830,6 +835,46 @@ const CardDetailModal = ({
                       * Retoma el trabajo para poder finalizar la orden
                     </p>
                   )}
+                </section>
+              )}
+
+              {/* Reopen Action (Admin Only for Finalized Cards) */}
+              {isAdmin && card.currentStep === 'finalizada' && (
+                <section className="space-y-3 pt-4 border-t border-slate-200">
+                  <h4 className="text-[10px] font-black text-red-500 uppercase tracking-widest italic">Panel de Reapertura (Admin)</h4>
+                  <p className="text-[10px] text-slate-500 leading-tight">Si la orden fue cerrada por error, puedes reingresarla a taller. Esto limpiará el estado de cierre.</p>
+                  <textarea 
+                    value={actionComment}
+                    onChange={e => setActionComment(e.target.value)}
+                    placeholder="Escribe el motivo de la reapertura..."
+                    className="w-full h-24 bg-white border border-red-200 rounded-2xl p-3 text-xs text-slate-900 focus:outline-none focus:border-red-400 transition-all resize-none"
+                  />
+                  <button 
+                    onClick={async () => {
+                      if (window.confirm("¿Estás seguro de que deseas reabrir esta orden? Se borrarán los datos del cierre actual.")) {
+                        setIsReopening(true);
+                        try {
+                          await onReabrir(actionComment);
+                        } catch (error: any) {
+                          console.error("Error reopening:", error);
+                          alert("Error al reabrir la orden: " + (error.message || "Error desconocido"));
+                        } finally {
+                          setIsReopening(false);
+                        }
+                      }
+                    }}
+                    disabled={!actionComment.trim() || isReopening}
+                    className="w-full py-3 bg-red-600 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-red-700 transition-all disabled:opacity-20 flex items-center justify-center gap-2"
+                  >
+                    {isReopening ? (
+                      <>
+                        <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        Procesando...
+                      </>
+                    ) : (
+                      'Reingresar a Taller'
+                    )}
+                  </button>
                 </section>
               )}
             </div>
@@ -1487,6 +1532,7 @@ const KPIModal = ({ onClose, users, incidents: parentIncidents, orders: parentOr
   })).filter(d => d.count > 0).sort((a, b) => b.count - a.count);
 
   // 5. Top Stats (Current Month)
+  const monthEntered = orders.filter(o => o.createdAt && format(o.createdAt.toDate(), 'yyyy-MM') === currentMonth).length;
   const monthOrders = orders.filter(o => o.finalizedAt && format(o.finalizedAt.toDate(), 'yyyy-MM') === currentMonth);
   const monthRepaired = monthOrders.filter(o => o.isRepaired).length;
   const monthTotalFinalized = monthOrders.length;
@@ -1727,7 +1773,17 @@ const KPIModal = ({ onClose, users, incidents: parentIncidents, orders: parentOr
           ) : (
             <div className="space-y-10">
               {/* Top Stats */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm flex items-center gap-6">
+                  <div className="w-16 h-16 bg-[#00aeef]/10 rounded-2xl flex items-center justify-center border border-[#00aeef]/20">
+                    <ClipboardList className="w-8 h-8 text-[#00aeef]" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Órdenes Ingresadas</p>
+                    <p className="text-4xl font-black text-slate-950">{monthEntered}</p>
+                    <p className="text-[10px] text-[#00aeef] font-bold mt-1">Total este mes</p>
+                  </div>
+                </div>
                 <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm flex items-center gap-6">
                   <div className="w-16 h-16 bg-green-50 rounded-2xl flex items-center justify-center border border-green-100">
                     <CheckCircle2 className="w-8 h-8 text-green-600" />
@@ -1739,12 +1795,12 @@ const KPIModal = ({ onClose, users, incidents: parentIncidents, orders: parentOr
                   </div>
                 </div>
                 <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm flex items-center gap-6">
-                  <div className="w-16 h-16 bg-[#00aeef]/10 rounded-2xl flex items-center justify-center border border-[#00aeef]/20">
-                    <Target className="w-8 h-8 text-[#00aeef]" />
+                  <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center border border-blue-50">
+                    <Target className="w-8 h-8 text-blue-600" />
                   </div>
                   <div>
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Tasa de Éxito</p>
-                    <p className="text-4xl font-black text-[#00aeef]">{successRate}%</p>
+                    <p className="text-4xl font-black text-blue-600">{successRate}%</p>
                     <p className="text-[10px] text-slate-500 font-bold mt-1">Efectividad Técnica</p>
                   </div>
                 </div>
@@ -1755,7 +1811,7 @@ const KPIModal = ({ onClose, users, incidents: parentIncidents, orders: parentOr
                   <div>
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Incidencias</p>
                     <p className="text-4xl font-black text-red-600">{monthIncidents}</p>
-                    <p className="text-[10px] text-slate-500 font-bold mt-1">Registradas este mes | {users.length} usuarios</p>
+                    <p className="text-[10px] text-slate-500 font-bold mt-1">Registradas este mes</p>
                   </div>
                 </div>
               </div>
@@ -3017,6 +3073,45 @@ export default function App() {
     }
   };
 
+  const handleReabrir = async (card: CardType, comment: string) => {
+    // Try to find the column by ID, then by name, then fallback to deterministic ID
+    const reparacionCol = columns.find(c => c.id === 'reparacion') || 
+                         columns.find(c => c.name.toLowerCase().includes('reparación'));
+    const reparacionColId = reparacionCol?.id || 'reparacion';
+
+    try {
+      await updateDoc(doc(db, 'cards', card.id), {
+        columnId: reparacionColId,
+        currentStep: 'reparacion',
+        order: cards.filter(c => c.columnId === reparacionColId).length,
+        isRepaired: deleteField(),
+        finalizedAt: deleteField(),
+        closingComment: deleteField(),
+        history: [...(card.history || []), {
+          step: 'reparacion',
+          timestamp: new Date(),
+          userId: user?.uid,
+          userName: user?.displayName || 'Anónimo',
+          comment: `REAPERTURA: ${comment}`
+        }]
+      });
+      
+      const toast = document.createElement('div');
+      toast.className = "fixed bottom-12 left-1/2 -translate-x-1/2 bg-green-600 text-white px-8 py-4 rounded-xl text-sm font-black z-[100] shadow-xl border border-white/20";
+      toast.innerText = "ORDEN REABIERTA EXITOSAMENTE";
+      document.body.appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transition = 'opacity 0.5s ease';
+        setTimeout(() => toast.remove(), 500);
+      }, 3000);
+
+      setActiveChat(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `cards/${card.id}`);
+    }
+  };
+
   const handleLogin = async () => {
     try {
       await signInWithPopup(auth, googleProvider);
@@ -3399,6 +3494,7 @@ export default function App() {
           onPausar={(comment) => handlePausar(activeChat, comment)}
           onReanudar={(comment) => handleReanudar(activeChat, comment)}
           onFinalizar={(isRepaired, comment) => handleFinalizar(activeChat, isRepaired, comment)}
+          onReabrir={(comment) => handleReabrir(activeChat, comment)}
         />
       )}
       {showUserManagement && (
