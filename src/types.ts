@@ -48,6 +48,20 @@ export interface Card {
     userName: string;
     comment?: string;
   }>;
+  originalPart?: {
+    type: string;
+    code: string;
+    imei: string;
+    isSellAndBuy: boolean;
+    isConsign: boolean;
+    isAudited: boolean;
+    auditedBy?: string;
+    auditedByName?: string;
+    auditedAt?: Timestamp;
+    registeredAt?: Timestamp;
+    registeredBy?: string;
+    registeredByName?: string;
+  };
 }
 
 export interface InvolvedUser {

@@ -46,6 +46,7 @@ import {
   Users,
   Settings,
   Shield,
+  ShieldCheck,
   UserCheck,
   UserCog,
   AlertTriangle,
@@ -516,6 +517,15 @@ const CardDetailModal = ({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const [isReopening, setIsReopening] = useState(false);
+  
+  // Original Part form state
+  const [partType, setPartType] = useState(card.originalPart?.type || '');
+  const [partCode, setPartCode] = useState(card.originalPart?.code || '');
+  const [partImei, setPartImei] = useState(card.originalPart?.imei || '');
+  const [isSellAndBuy, setIsSellAndBuy] = useState(card.originalPart?.isSellAndBuy || false);
+  const [isConsign, setIsConsign] = useState(card.originalPart?.isConsign || false);
+  const [isSavingPart, setIsSavingPart] = useState(false);
+  const [editPart, setEditPart] = useState(!card.originalPart);
 
   useEffect(() => {
     const q = query(
@@ -751,6 +761,161 @@ const CardDetailModal = ({
                   </div>
                 </section>
               )}
+
+              {/* Original Parts Section */}
+              <section className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Repuestos Originales</h4>
+                  {card.originalPart && !editPart && !card.originalPart.isAudited && canAction && (
+                    <button 
+                      onClick={() => setEditPart(true)}
+                      className="text-[9px] font-bold text-[#00aeef] uppercase tracking-widest hover:underline"
+                    >
+                      Editar
+                    </button>
+                  )}
+                </div>
+
+                {!editPart && card.originalPart ? (
+                  <div className={cn(
+                    "bg-white p-4 rounded-2xl border transition-all relative overflow-hidden",
+                    card.originalPart.isAudited ? "border-green-200" : "border-slate-200"
+                  )}>
+                    {card.originalPart.isAudited && (
+                      <div className="absolute top-0 right-0 p-2">
+                        <ShieldCheck className="w-4 h-4 text-green-500" />
+                      </div>
+                    )}
+                    <div className="space-y-3">
+                      <div>
+                        <p className="text-[8px] text-slate-400 font-black uppercase tracking-widest">Tipo de Repuesto</p>
+                        <p className="text-[11px] font-bold text-slate-900">{card.originalPart.type}</p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <p className="text-[8px] text-slate-400 font-black uppercase tracking-widest">Código</p>
+                          <p className="text-[11px] font-bold text-slate-900">{card.originalPart.code}</p>
+                        </div>
+                        <div>
+                          <p className="text-[8px] text-slate-400 font-black uppercase tracking-widest">IMEI</p>
+                          <p className="text-[11px] font-bold text-slate-900">{card.originalPart.imei}</p>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        {card.originalPart.isSellAndBuy && (
+                          <span className="px-2 py-0.5 bg-blue-50 text-blue-600 text-[8px] font-black rounded-md border border-blue-100 uppercase tracking-widest">Sell & Buy</span>
+                        )}
+                        {card.originalPart.isConsign && (
+                          <span className="px-2 py-0.5 bg-purple-50 text-purple-600 text-[8px] font-black rounded-md border border-purple-100 uppercase tracking-widest">Consign</span>
+                        )}
+                      </div>
+                      <div className="pt-2 border-t border-slate-50 flex items-center justify-between">
+                        <span className={cn(
+                          "text-[8px] font-black uppercase tracking-widest",
+                          card.originalPart.isAudited ? "text-green-600" : "text-amber-500"
+                        )}>
+                          {card.originalPart.isAudited ? "Procesamiento Finalizado" : "Pendiente de Auditoría"}
+                        </span>
+                        {card.originalPart.auditedByName && (
+                          <span className="text-[8px] text-slate-400 font-medium italic">Por: {card.originalPart.auditedByName}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : canAction ? (
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 space-y-4">
+                    <div className="space-y-3">
+                      <input 
+                        type="text"
+                        placeholder="Tipo de Repuesto"
+                        value={partType}
+                        onChange={e => setPartType(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-[11px] focus:outline-none focus:border-[#00aeef]/30"
+                      />
+                      <div className="grid grid-cols-2 gap-2">
+                        <input 
+                          type="text"
+                          placeholder="Código"
+                          value={partCode}
+                          onChange={e => setPartCode(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-[11px] focus:outline-none focus:border-[#00aeef]/30"
+                        />
+                        <input 
+                          type="text"
+                          placeholder="IMEI"
+                          value={partImei}
+                          onChange={e => setPartImei(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-[11px] focus:outline-none focus:border-[#00aeef]/30"
+                        />
+                      </div>
+                      <div className="flex gap-4 p-2 bg-slate-50 rounded-xl border border-slate-100">
+                        <label className="flex items-center gap-2 cursor-pointer group">
+                          <input 
+                            type="checkbox" 
+                            checked={isSellAndBuy}
+                            onChange={() => setIsSellAndBuy(!isSellAndBuy)}
+                            className="w-3.5 h-3.5 rounded border-slate-300 text-[#00aeef] focus:ring-0"
+                          />
+                          <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Sell & Buy</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer group">
+                          <input 
+                            type="checkbox" 
+                            checked={isConsign}
+                            onChange={() => setIsConsign(!isConsign)}
+                            className="w-3.5 h-3.5 rounded border-slate-300 text-[#00aeef] focus:ring-0"
+                          />
+                          <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Consign</span>
+                        </label>
+                      </div>
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={async () => {
+                            if (!partType || !partCode || !partImei) return;
+                            setIsSavingPart(true);
+                            try {
+                              await updateDoc(doc(db, 'cards', card.id), {
+                                originalPart: {
+                                  type: partType,
+                                  code: partCode,
+                                  imei: partImei,
+                                  isSellAndBuy,
+                                  isConsign,
+                                  isAudited: false,
+                                  registeredAt: serverTimestamp(),
+                                  registeredBy: user.uid,
+                                  registeredByName: user.displayName || 'Anónimo'
+                                }
+                              });
+                              setEditPart(false);
+                            } catch (e) {
+                              console.error(e);
+                            } finally {
+                              setIsSavingPart(false);
+                            }
+                          }}
+                          disabled={!partType || !partCode || !partImei || isSavingPart}
+                          className="flex-1 py-2.5 bg-slate-900 text-white text-[9px] font-black uppercase tracking-widest rounded-xl hover:bg-slate-800 disabled:opacity-30"
+                        >
+                          {isSavingPart ? 'Guardando...' : 'Registrar Repuesto'}
+                        </button>
+                        {card.originalPart && (
+                          <button 
+                            onClick={() => setEditPart(false)}
+                            className="px-4 py-2.5 bg-slate-100 text-slate-600 text-[9px] font-black uppercase tracking-widest rounded-xl hover:bg-slate-200"
+                          >
+                            Cancelar
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-4 rounded-2xl border border-dashed border-slate-300 flex items-center justify-center">
+                    <p className="text-[10px] text-slate-400 italic">No hay repuestos registrados.</p>
+                  </div>
+                )}
+              </section>
 
               {/* Decision Log (Replaces generic history) */}
               <section className="space-y-4">
@@ -2369,6 +2534,143 @@ const IncidentsManagementModal = ({ onClose, users, user }: IncidentsManagementM
   );
 };
 
+interface AuditoriaOriginalesModalProps {
+  onClose: () => void;
+  cards: CardType[];
+  user: User;
+}
+
+const AuditoriaOriginalesModal = ({ onClose, cards, user }: AuditoriaOriginalesModalProps) => {
+  const [activeTab, setActiveTab] = useState<'pendientes' | 'finalizadas'>('pendientes');
+
+  const originalPartsCards = cards.filter(c => c.originalPart);
+  const pendingCards = originalPartsCards.filter(c => !c.originalPart?.isAudited);
+  const finalizedCards = originalPartsCards.filter(c => c.originalPart?.isAudited);
+
+  const displayCards = activeTab === 'pendientes' ? pendingCards : finalizedCards;
+
+  const handleFinalizar = async (card: CardType) => {
+    try {
+      await updateDoc(doc(db, 'cards', card.id), {
+        'originalPart.isAudited': true,
+        'originalPart.auditedBy': user.uid,
+        'originalPart.auditedByName': user.displayName || 'Admin',
+        'originalPart.auditedAt': serverTimestamp(),
+        history: [...(card.history || []), {
+          step: card.currentStep,
+          timestamp: Timestamp.now(),
+          userId: user.uid,
+          userName: user.displayName || 'Admin',
+          comment: `REPUESTO AUDITADO POR ${user.displayName || 'Admin'}`
+        }]
+      });
+    } catch (e) {
+      console.error(e);
+      alert("Error al finalizar auditoría");
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
+      <div 
+        className="bg-white w-full max-w-4xl h-[80vh] rounded-xl border border-slate-300 shadow-xl flex flex-col overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="p-6 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center border border-blue-200">
+              <ShieldCheck className="w-6 h-6 text-blue-600" />
+            </div>
+            <div>
+              <h3 className="font-black text-xl text-slate-950 tracking-tight">Auditoría Originales</h3>
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Gestión de Stock de Repuestos Originales</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full text-slate-600">
+            <X className="w-6 h-6" />
+          </button>
+        </div>
+
+        <div className="flex border-b border-slate-200">
+          <button 
+            onClick={() => setActiveTab('pendientes')}
+            className={cn(
+              "flex-1 py-4 text-[10px] font-black uppercase tracking-widest transition-all border-b-2",
+              activeTab === 'pendientes' ? "border-blue-500 text-blue-600 bg-blue-50/30" : "border-transparent text-slate-400 hover:text-slate-600"
+            )}
+          >
+            Pendientes ({pendingCards.length})
+          </button>
+          <button 
+            onClick={() => setActiveTab('finalizadas')}
+            className={cn(
+              "flex-1 py-4 text-[10px] font-black uppercase tracking-widest transition-all border-b-2",
+              activeTab === 'finalizadas' ? "border-green-500 text-green-600 bg-green-50/30" : "border-transparent text-slate-400 hover:text-slate-600"
+            )}
+          >
+            Finalizado ({finalizedCards.length})
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6 scrollbar-none">
+          {displayCards.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-center space-y-4">
+              <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center border border-slate-100">
+                <Check className="w-8 h-8 text-slate-200" />
+              </div>
+              <p className="text-sm font-bold text-slate-400">No hay órdenes en esta categoría</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {displayCards.map(card => (
+                <div key={card.id} className="bg-white border border-slate-200 rounded-2xl p-6 hover:border-blue-200 transition-all flex items-center justify-between shadow-sm">
+                  <div className="flex items-center gap-6">
+                    <div className="text-center min-w-[80px]">
+                      <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Orden</p>
+                      <p className="text-lg font-black text-slate-900 leading-none">#{card.title}</p>
+                    </div>
+                    <div className="h-10 w-px bg-slate-100" />
+                    <div>
+                      <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Repuesto Original</p>
+                      <p className="text-sm font-black text-slate-900">{card.originalPart?.type}</p>
+                      <p className="text-[10px] text-slate-500 font-medium">Código: {card.originalPart?.code} | IMEI: {card.originalPart?.imei}</p>
+                    </div>
+                    <div className="flex gap-2">
+                      {card.originalPart?.isSellAndBuy && (
+                        <span className="px-3 py-1 bg-blue-50 text-blue-600 text-[8px] font-black rounded-lg border border-blue-100 uppercase tracking-widest">Sell & Buy</span>
+                      )}
+                      {card.originalPart?.isConsign && (
+                        <span className="px-3 py-1 bg-purple-50 text-purple-600 text-[8px] font-black rounded-lg border border-purple-100 uppercase tracking-widest">Consign</span>
+                      )}
+                    </div>
+                  </div>
+                  
+                  {activeTab === 'pendientes' ? (
+                    <button 
+                      onClick={() => handleFinalizar(card)}
+                      className="px-6 py-3 bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20"
+                    >
+                      Finalizar
+                    </button>
+                  ) : (
+                    <div className="text-right">
+                      <div className="flex items-center gap-2 text-green-600 mb-1">
+                        <ShieldCheck className="w-4 h-4" />
+                        <span className="text-[10px] font-black uppercase tracking-widest">Auditado</span>
+                      </div>
+                      <p className="text-[8px] text-slate-400 font-bold uppercase tracking-tight">Por: {card.originalPart?.auditedByName}</p>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 interface ResetSystemModalProps {
   onClose: () => void;
   onConfirm: () => Promise<void>;
@@ -2671,6 +2973,7 @@ export default function App() {
   const [newCardTags, setNewCardTags] = useState<string[]>([]);
   const [showUserManagement, setShowUserManagement] = useState(false);
   const [showIncidentsManagement, setShowIncidentsManagement] = useState(false);
+  const [showAuditoriaOriginales, setShowAuditoriaOriginales] = useState(false);
   const [showAttendanceManagement, setShowAttendanceManagement] = useState(false);
   const [showKPIs, setShowKPIs] = useState(false);
   const [showUserActivity, setShowUserActivity] = useState(false);
@@ -3320,6 +3623,19 @@ export default function App() {
                 <BarChart3 className="w-5 h-5" />
               </button>
               <button 
+                onClick={() => setShowAuditoriaOriginales(true)}
+                className={cn(
+                  "p-2 hover:bg-slate-100 rounded-xl transition-colors relative group",
+                  cards.some(c => c.originalPart && !c.originalPart.isAudited) ? "text-blue-500" : "text-slate-600"
+                )}
+                title="Auditoría Originales"
+              >
+                <ShieldCheck className="w-5 h-5" />
+                {cards.some(c => c.originalPart && !c.originalPart.isAudited) && (
+                  <span className="absolute top-1 right-1 flex h-2 w-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
+                )}
+              </button>
+              <button 
                 onClick={() => setShowIncidentsManagement(true)}
                 className={cn(
                   "p-2 hover:bg-slate-100 rounded-xl transition-colors relative group",
@@ -3507,6 +3823,13 @@ export default function App() {
         <IncidentsManagementModal 
           onClose={() => setShowIncidentsManagement(false)}
           users={users}
+          user={user}
+        />
+      )}
+      {showAuditoriaOriginales && (
+        <AuditoriaOriginalesModal 
+          onClose={() => setShowAuditoriaOriginales(false)}
+          cards={cards}
           user={user}
         />
       )}
