@@ -708,20 +708,11 @@ const CardDetailModal = ({
                           
                           // Auto-create incident if GARANTIA was just added
                           if (!hasGarantia) {
-                            await addDoc(collection(db, 'incidents'), {
-                              type: 'garantia',
-                              orderNumber: card.title,
-                              primaryOrderNumber: '', 
-                              incidentUserId: card.assignedTechnicianId || null,
-                              incidentUserName: card.assignedTechnicianName || null,
-                              solvingUserId: null,
-                              solvingUserName: null,
-                              solutionComment: 'Incidencia generada automáticamente al marcar la orden como GARANTÍA desde el panel de control.',
-                              status: 'abierta',
-                              reportedBy: user.uid,
-                              reportedByName: user.displayName || 'Anónimo',
-                              createdAt: serverTimestamp()
-                            });
+                            await createWarrantyIncident(
+                              card.title,
+                              card.assignedTechnicianId,
+                              card.assignedTechnicianName
+                            );
                           }
                         } catch (error) {
                           handleFirestoreError(error, OperationType.WRITE, `cards/${card.id}`);
@@ -3198,6 +3189,27 @@ export default function App() {
     };
   }, [user]);
 
+  const createWarrantyIncident = async (cardTitle: string, technicianId?: string | null, technicianName?: string | null) => {
+    try {
+      await addDoc(collection(db, 'incidents'), {
+        type: 'garantia',
+        orderNumber: cardTitle,
+        primaryOrderNumber: '', 
+        incidentUserId: technicianId || null,
+        incidentUserName: technicianName || null,
+        solvingUserId: null,
+        solvingUserName: null,
+        solutionComment: 'Incidencia generada automáticamente por el sistema al marcar la orden como GARANTÍA.',
+        status: 'abierta',
+        reportedBy: user.uid,
+        reportedByName: user.displayName || 'Anónimo',
+        createdAt: serverTimestamp()
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'incidents');
+    }
+  };
+
   const handleCreateCard = async () => {
     if (!newCardTitle.trim()) return;
     
@@ -3234,20 +3246,7 @@ export default function App() {
 
       // Auto-create incident if GARANTIA tag is present
       if (newCardTags.includes('GARANTIA')) {
-        await addDoc(collection(db, 'incidents'), {
-          type: 'garantia',
-          orderNumber: newCardTitle.trim(),
-          primaryOrderNumber: '', // To be filled by admin later
-          incidentUserId: null,
-          incidentUserName: null,
-          solvingUserId: null,
-          solvingUserName: null,
-          solutionComment: 'Incidencia generada automáticamente por sistema al marcar Garantía en el ingreso.',
-          status: 'abierta',
-          reportedBy: user.uid,
-          reportedByName: user.displayName || 'Anónimo',
-          createdAt: serverTimestamp()
-        });
+        await createWarrantyIncident(newCardTitle.trim());
       }
 
       setNewCardTitle('');
